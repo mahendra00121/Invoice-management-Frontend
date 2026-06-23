@@ -20,13 +20,40 @@ import Sidebar from "@/components/Sidebar"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
+
+const getInitials = (name: string) => {
+  if (!name) return "?";
+  const parts = name.trim().split(" ");
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+};
+
+const getAvatarColor = (name: string) => {
+  if (!name) return "bg-slate-500";
+  const colors = [
+    "bg-blue-500", "bg-emerald-500", "bg-purple-500", 
+    "bg-amber-500", "bg-pink-500", "bg-indigo-500", "bg-rose-500"
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
 
 export default function AuditLogsPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [logs, setLogs] = useState<any[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
+  const [actionFilter, setActionFilter] = useState("All")
 
   const fetchLogs = async () => {
     setIsLoading(true)
@@ -49,15 +76,35 @@ export default function AuditLogsPage() {
   }
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
+        window.location.href = "/login"
+        return
+      }
+      try {
+        const userObj = JSON.parse(userStr)
+        const perms = userObj.permissions ? userObj.permissions.split(',') : []
+        if (!perms.includes("AuditLogs.View")) {
+          window.location.href = "/" // Redirect if no permission
+          return
+        }
+      } catch (e) {}
+    }
     fetchLogs()
   }, [])
 
-  const filteredLogs = logs.filter(log => 
-    log.userName?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-    log.entityName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    log.action?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    log.details?.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const filteredLogs = logs.filter(log => {
+    const matchesSearch = 
+      log.userName?.toLowerCase().includes(searchQuery.toLowerCase()) || 
+      log.entityName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      log.action?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      log.details?.toLowerCase().includes(searchQuery.toLowerCase());
+      
+    const matchesAction = actionFilter === "All" || log.action?.toLowerCase() === actionFilter.toLowerCase();
+    
+    return matchesSearch && matchesAction;
+  })
 
   const getActionIcon = (action: string) => {
     switch (action.toLowerCase()) {
@@ -78,6 +125,16 @@ export default function AuditLogsPage() {
       default: return "bg-muted/50 text-muted-foreground border-border"
     }
   }
+
+  // --- Analytics Calculations ---
+  const totalEvents = logs.length;
+  const criticalActions = logs.filter(log => log.action?.toLowerCase() === "delete").length;
+  const todayEvents = logs.filter(log => {
+    if (!log.timestamp) return false;
+    const logDate = new Date(log.timestamp.endsWith('Z') ? log.timestamp : log.timestamp + 'Z').toDateString();
+    const today = new Date().toDateString();
+    return logDate === today;
+  }).length;
 
   return (
     <div className="flex h-screen bg-background text-foreground font-sans selection:bg-primary/20 overflow-hidden">
@@ -109,6 +166,48 @@ export default function AuditLogsPage() {
         <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-muted/5">
           <div className="max-w-5xl mx-auto space-y-6">
             
+            {/* System Health Stats Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+              {/* Total Events */}
+              <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-blue-500/20 transition-all">
+                <CardContent className="p-6 flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Total Events</span>
+                    <span className="text-3xl font-black text-foreground tracking-tight block">{totalEvents}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-500 flex items-center justify-center">
+                    <Database className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Critical Actions */}
+              <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-red-500/20 transition-all">
+                <CardContent className="p-6 flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Critical (Deletions)</span>
+                    <span className="text-3xl font-black text-red-500 tracking-tight block">{criticalActions}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 flex items-center justify-center">
+                    <Trash2 className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Today's Activity */}
+              <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-emerald-500/20 transition-all">
+                <CardContent className="p-6 flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Today's Activity</span>
+                    <span className="text-3xl font-black text-emerald-500 tracking-tight block">{todayEvents}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center">
+                    <Activity className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
             {/* Top Stats & Filters */}
             <Card className="border border-border bg-card shadow-sm rounded-3xl overflow-hidden relative">
               <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 to-pink-500"></div>
@@ -135,9 +234,50 @@ export default function AuditLogsPage() {
                       className="pl-9 h-11 rounded-xl bg-transparent border-border focus:bg-background transition-colors w-full text-sm font-semibold"
                     />
                   </div>
-                  <Button variant="outline" size="icon" className="h-11 w-11 rounded-xl border-border">
-                    <Filter className="w-4 h-4" />
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant={actionFilter !== "All" ? "default" : "outline"} size="icon" className={`h-11 w-11 rounded-xl border-border ${actionFilter !== "All" ? "bg-primary text-primary-foreground hover:bg-primary/90" : ""}`}>
+                        <Filter className="w-4 h-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-48 rounded-xl">
+                      <DropdownMenuCheckboxItem 
+                        checked={actionFilter === "All"}
+                        onCheckedChange={() => setActionFilter("All")}
+                        className="font-semibold cursor-pointer"
+                      >
+                        All Actions
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem 
+                        checked={actionFilter === "Create"}
+                        onCheckedChange={() => setActionFilter("Create")}
+                        className="font-semibold cursor-pointer"
+                      >
+                        Create
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem 
+                        checked={actionFilter === "Update"}
+                        onCheckedChange={() => setActionFilter("Update")}
+                        className="font-semibold cursor-pointer"
+                      >
+                        Update
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem 
+                        checked={actionFilter === "Delete"}
+                        onCheckedChange={() => setActionFilter("Delete")}
+                        className="font-semibold cursor-pointer"
+                      >
+                        Delete
+                      </DropdownMenuCheckboxItem>
+                      <DropdownMenuCheckboxItem 
+                        checked={actionFilter === "Login"}
+                        onCheckedChange={() => setActionFilter("Login")}
+                        className="font-semibold cursor-pointer"
+                      >
+                        Login / Auth
+                      </DropdownMenuCheckboxItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </CardContent>
             </Card>
@@ -155,8 +295,8 @@ export default function AuditLogsPage() {
                     return (
                       <div key={log.id} className={`relative pl-8 sm:pl-10 transition-all duration-300 hover:translate-x-1 group`}>
                         {/* Timeline Node */}
-                        <div className={`absolute -left-[17px] top-1 w-8 h-8 rounded-full border-4 border-card flex items-center justify-center ${isFirst ? 'bg-primary shadow-lg shadow-primary/30 scale-110' : 'bg-muted-foreground/20'}`}>
-                          {isFirst ? <Activity className="w-3 h-3 text-white" /> : <div className="w-1.5 h-1.5 rounded-full bg-card" />}
+                        <div className={`absolute -left-[17px] top-1 w-8 h-8 rounded-full border-2 border-background flex items-center justify-center text-[10px] font-bold text-white shadow-sm z-10 ${getAvatarColor(log.userName || 'System')} ${isFirst ? 'scale-110 ring-2 ring-primary/30 ring-offset-2 ring-offset-background' : ''}`}>
+                          {getInitials(log.userName || 'System')}
                         </div>
                         
                         {/* Content Card */}
@@ -182,8 +322,8 @@ export default function AuditLogsPage() {
                           </p>
 
                           <div className="flex items-center gap-2 mt-4 pt-3 border-t border-border/50">
-                            <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-[10px] font-bold text-primary">
-                              {log.userName ? log.userName.charAt(0).toUpperCase() : "?"}
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[9px] font-bold text-white ${getAvatarColor(log.userName || 'System')}`}>
+                              {getInitials(log.userName || 'System')}
                             </div>
                             <span className="text-xs font-bold text-muted-foreground">
                               Executed by <span className="text-foreground">{log.userName || "System / Unknown"}</span>
@@ -195,9 +335,25 @@ export default function AuditLogsPage() {
                   })}
                 </div>
               ) : (
-                <div className="h-40 flex flex-col items-center justify-center text-center space-y-2">
-                  <Activity className="w-8 h-8 text-muted-foreground/30" />
-                  <p className="text-sm font-bold text-muted-foreground">No activity logs found.</p>
+                <div className="py-20 flex flex-col items-center justify-center text-center space-y-4 max-w-sm mx-auto">
+                  <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center border border-border shadow-sm border-dashed">
+                    <Search className="w-8 h-8 text-muted-foreground/50" />
+                  </div>
+                  <div className="space-y-1.5">
+                    <h3 className="text-base font-bold text-foreground">No results found</h3>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      We couldn't find any system activity matching your search criteria. Try adjusting your filters or search terms.
+                    </p>
+                  </div>
+                  {searchQuery && (
+                    <Button 
+                      onClick={() => setSearchQuery("")}
+                      variant="outline"
+                      className="bg-background hover:bg-muted text-xs font-bold rounded-xl mt-2 border-border shadow-sm"
+                    >
+                      Clear Search
+                    </Button>
+                  )}
                 </div>
               )}
             </div>

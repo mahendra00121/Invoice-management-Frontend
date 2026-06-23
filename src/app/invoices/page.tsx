@@ -51,6 +51,13 @@ import {
   DialogHeader, 
   DialogTitle 
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from "sonner"
 
 function SearchableSelect({ options, value, onChange, placeholder, required = false }: { options: {id: string|number, label: string}[], value: string|number, onChange: (val: string|number) => void, placeholder: string, required?: boolean }) {
@@ -407,6 +414,7 @@ function numberToWords(num: number): string {
 
 export default function InvoicesPage() {
   const [mounted, setMounted] = useState(false)
+  const [userPermissions, setUserPermissions] = useState<string[]>([])
   
   // Data lists loaded from local storage directly in constructor
   const [customers, setCustomers] = useState<Customer[]>(() => {
@@ -467,14 +475,15 @@ export default function InvoicesPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const user = localStorage.getItem("invoice_management_user")
-      if (!user) {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
         window.location.href = "/login"
         return
       }
-      if (!localStorage.getItem("invoice_management_invoices")) {
-        
-      }
+      try {
+        const userObj = JSON.parse(userStr)
+        setUserPermissions(userObj.permissions ? userObj.permissions.split(',') : [])
+      } catch (e) {}
     }
     
     const loadData = async () => {
@@ -1359,6 +1368,23 @@ export default function InvoicesPage() {
     }
   }
 
+  const getDispatchBadge = (statusVal: string) => {
+    switch (statusVal) {
+      case "Packed":
+        return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+      case "Dispatched":
+        return "bg-indigo-500/10 text-indigo-500 border-indigo-500/20";
+      case "In Transit":
+        return "bg-purple-500/10 text-purple-500 border-purple-500/20";
+      case "Delivered":
+        return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20 shadow-[0_0_8px_rgba(16,185,129,0.1)]";
+      case "Returned":
+        return "bg-rose-500/10 text-rose-500 border-rose-500/20";
+      default:
+        return "bg-amber-500/10 text-amber-500 border-amber-500/20";
+    }
+  }
+
   const handleSendReminder = (inv: any) => {
     toast.success(`Stern payment reminder dispatched to ${inv.customerEmail} for Invoice ${inv.invoiceNumber}!`, { icon: '🚨' });
   }
@@ -1458,12 +1484,14 @@ export default function InvoicesPage() {
               )}
             </Button>
 
-            <Button 
-              onClick={handleOpenCreateForm}
-              className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
-            >
-              <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Direct Invoice</span>
-            </Button>
+            {userPermissions.includes("Invoices.CRUD") && (
+              <Button 
+                onClick={handleOpenCreateForm}
+                className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
+              >
+                <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Direct Invoice</span>
+              </Button>
+            )}
           </div>
         </header>
 
@@ -1621,9 +1649,15 @@ export default function InvoicesPage() {
                                 {inv.currency === "INR" ? "₹" : "$"}
                                 {inv.paidAmount.toLocaleString("en-IN", { minimumFractionDigits: 0 })}
                               </span>
-                              {inv.paidAmount > 0 && inv.balanceAmount > 0 && (
-                                <div className="w-12 h-1 bg-muted rounded-full mt-1 overflow-hidden flex" title={`${Math.round((inv.paidAmount / inv.grandTotal) * 100)}% Paid`}>
-                                  <div className="h-full bg-blue-500 rounded-full" style={{ width: `${Math.min(100, Math.round((inv.paidAmount / inv.grandTotal) * 100))}%` }}></div>
+                              {inv.paidAmount > 0 && (
+                                <div 
+                                  className="w-16 h-1.5 bg-muted rounded-full mt-1.5 overflow-hidden flex shadow-inner" 
+                                  title={`${Math.round((inv.paidAmount / inv.grandTotal) * 100)}% Paid`}
+                                >
+                                  <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${inv.balanceAmount <= 0 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-gradient-to-r from-blue-500 to-indigo-500'}`} 
+                                    style={{ width: `${Math.min(100, Math.round((inv.paidAmount / inv.grandTotal) * 100))}%` }}
+                                  ></div>
                                 </div>
                               )}
                             </div>
@@ -1656,8 +1690,8 @@ export default function InvoicesPage() {
                               )}
                               {inv.displayStatus}
                             </span>
-                            {inv.dispatchStatus && inv.dispatchStatus !== "Pending" && (
-                              <span className="block mt-1 w-max px-1.5 py-0.5 rounded text-[8px] font-bold tracking-widest uppercase bg-indigo-500/10 text-indigo-500 border border-indigo-500/20">
+                            {inv.dispatchStatus && (
+                              <span className={`block mt-1.5 w-max px-2 py-0.5 rounded-md text-[9px] font-black tracking-widest uppercase border ${getDispatchBadge(inv.dispatchStatus)}`}>
                                 🚚 {inv.dispatchStatus}
                               </span>
                             )}
@@ -1667,15 +1701,17 @@ export default function InvoicesPage() {
                           <TableCell className="px-3">
                             <div className="flex items-center justify-center gap-1.5">
                               {/* Record Payment */}
-                              <Button 
-                                onClick={() => handleOpenPaymentRecord(inv)}
-                                variant="ghost" 
-                                size="icon"
-                                className="h-8 w-8 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10 rounded-lg transition-all shadow-[0_0_10px_rgba(16,185,129,0.1)]"
-                                title="Record Payment / View History"
-                              >
-                                <IndianRupee className="w-4 h-4" />
-                              </Button>
+                              {userPermissions.includes("Invoices.CRUD") && (
+                                <Button 
+                                  onClick={() => handleOpenPaymentRecord(inv)}
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="h-8 w-8 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10 rounded-lg transition-all shadow-[0_0_10px_rgba(16,185,129,0.1)]"
+                                  title="Record Payment / View History"
+                                >
+                                  <IndianRupee className="w-4 h-4" />
+                                </Button>
+                              )}
 
                               {/* Send Reminder for Overdue */}
                               {inv.isOverdue && (
@@ -1700,15 +1736,17 @@ export default function InvoicesPage() {
                                 <MapPin className="w-4 h-4" />
                               </Button>
                               {/* Edit invoice Form */}
-                              <Button 
-                                onClick={() => handleOpenEditForm(inv)}
-                                variant="ghost" 
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
-                                title="Edit/Track Payments"
-                              >
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-                              </Button>
+                              {userPermissions.includes("Invoices.CRUD") && (
+                                <Button 
+                                  onClick={() => handleOpenEditForm(inv)}
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                  title="Edit/Track Payments"
+                                >
+                                  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                                </Button>
+                              )}
 
                               {/* View invoice PDF template */}
                               <Button 
@@ -1741,33 +1779,39 @@ export default function InvoicesPage() {
                               </Button>
 
                               {/* Delete */}
-                              <Button 
-                                onClick={() => {
-                                  setSelectedInvoice(inv)
-                                  setIsDeleteOpen(true)
-                                }}
-                                variant="ghost" 
-                                size="icon"
-                                className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                title="Delete Invoice Entry"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                              {userPermissions.includes("Invoices.CRUD") && (
+                                <Button 
+                                  onClick={() => {
+                                    setSelectedInvoice(inv)
+                                    setIsDeleteOpen(true)
+                                  }}
+                                  variant="ghost" 
+                                  size="icon"
+                                  className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                  title="Delete Invoice Entry"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
                       ))
                     ) : (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={8} className="text-center py-16 text-muted-foreground px-6 border-b border-border">
-                          <div className="flex flex-col items-center justify-center space-y-3">
-                            <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground border border-border">
-                              <FileCheck className="w-6 h-6 text-muted-foreground" />
+                        <TableCell colSpan={8} className="h-[400px]">
+                          <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                            <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                              <FileCheck className="w-10 h-10 text-primary opacity-80" />
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-foreground">No invoices generated yet</p>
-                              <p className="text-xs text-muted-foreground mt-1">Try tweaking your search keywords or create a direct invoice entry above.</p>
-                            </div>
+                            <h3 className="text-xl font-black text-foreground mb-2">No Invoices Found</h3>
+                            <p className="text-sm text-muted-foreground mb-6">
+                              There are no invoices matching your current filters. Try tweaking your search or create a new one.
+                            </p>
+                            <Button onClick={handleOpenCreateForm} className="font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                              <Plus className="w-4 h-4 mr-2" />
+                              Compose Direct Invoice
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -2039,16 +2083,17 @@ export default function InvoicesPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <select
-                      value={linkedQuotationNumber}
-                      onChange={(e) => handleQuotationLinkage(e.target.value)}
-                      className="px-3 bg-card border border-border focus:ring-1 focus:ring-primary rounded-xl h-9 text-xs font-bold text-foreground outline-none w-48 shadow-sm"
-                    >
-                      <option value="" className="bg-card text-foreground">-- Link Quotation --</option>
-                      {quotations.filter(q => q.status === "Approved").map(q => (
-                        <option key={q.id} value={q.quotationNumber} className="bg-card text-foreground">{q.quotationNumber} - {q.customerName}</option>
-                      ))}
-                    </select>
+                    <Select value={linkedQuotationNumber || "none"} onValueChange={(val) => handleQuotationLinkage(val === "none" ? "" : val)}>
+                      <SelectTrigger className="px-3 bg-card border border-border focus:ring-1 focus:ring-primary rounded-xl h-9 text-xs font-bold text-foreground outline-none w-48 shadow-sm">
+                        <SelectValue placeholder="-- Link Quotation --" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">-- Link Quotation --</SelectItem>
+                        {quotations.filter(q => q.status === "Approved").map(q => (
+                          <SelectItem key={q.id} value={q.quotationNumber}>{q.quotationNumber} - {q.customerName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 </div>
               )}
@@ -2145,45 +2190,45 @@ export default function InvoicesPage() {
                   {/* Payment terms */}
                   <div className="space-y-1.5">
                     <Label htmlFor="payT" className="text-xs font-bold text-foreground/80">Payment Terms</Label>
-                    <select
-                      id="payT"
-                      value={paymentTerms}
-                      onChange={(e) => setPaymentTerms(e.target.value)}
-                      className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none"
-                    >
-                      {PAYMENT_TERMS.map(term => (
-                        <option key={term} value={term} className="bg-card text-foreground">{term}</option>
-                      ))}
-                    </select>
+                    <Select value={paymentTerms} onValueChange={setPaymentTerms}>
+                      <SelectTrigger id="payT" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none">
+                        <SelectValue placeholder="Select Payment Terms" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_TERMS.map(term => (
+                          <SelectItem key={term} value={term}>{term}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Sales Person Dropdown */}
                   <div className="space-y-1.5">
                     <Label htmlFor="salesP" className="text-xs font-bold text-foreground/80">Sales Person</Label>
-                    <select
-                      id="salesP"
-                      value={salesPerson}
-                      onChange={(e) => setSalesPerson(e.target.value)}
-                      className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none"
-                    >
-                      {SALES_PERSONS.map(name => (
-                        <option key={name} value={name} className="bg-card text-foreground">{name}</option>
-                      ))}
-                    </select>
+                    <Select value={salesPerson} onValueChange={setSalesPerson}>
+                      <SelectTrigger id="salesP" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none">
+                        <SelectValue placeholder="Select Sales Person" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SALES_PERSONS.map(name => (
+                          <SelectItem key={name} value={name}>{name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Currency dropdown */}
                   <div className="space-y-1.5">
                     <Label htmlFor="currencyMode" className="text-xs font-bold text-foreground/80">Currency</Label>
-                    <select
-                      id="currencyMode"
-                      value={currency}
-                      onChange={(e) => setCurrency(e.target.value as "INR" | "USD")}
-                      className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-bold text-foreground outline-none"
-                    >
-                      <option value="INR" className="bg-card text-foreground">INR (₹)</option>
-                      <option value="USD" className="bg-card text-foreground">USD ($)</option>
-                    </select>
+                    <Select value={currency} onValueChange={(val: any) => setCurrency(val)}>
+                      <SelectTrigger id="currencyMode" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-bold text-foreground outline-none">
+                        <SelectValue placeholder="Select Currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="INR">INR (₹)</SelectItem>
+                        <SelectItem value="USD">USD ($)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Invoice Status (Auto-computed but displayable) */}
@@ -2318,37 +2363,41 @@ export default function InvoicesPage() {
                             </td>
 
                             {/* GST Selection */}
-                            <td className="py-3.5">
-                              <select
-                                value={item.gstPercent}
-                                onChange={(e) => handleRowItemChange(item.id, "gstPercent", parseInt(e.target.value) || 0)}
-                                className="mx-auto bg-background border border-border rounded-lg h-9 px-2 text-xs font-extrabold text-foreground outline-none text-center block w-20"
-                              >
-                                <option value={0}>0%</option>
-                                <option value={5}>5%</option>
-                                <option value={12}>12%</option>
-                                <option value={18}>18%</option>
-                                <option value={28}>28%</option>
-                              </select>
+                            <td className="py-3.5 px-2">
+                              <Select value={item.gstPercent.toString()} onValueChange={(val) => handleRowItemChange(item.id, "gstPercent", parseInt(val) || 0)}>
+                                <SelectTrigger className="mx-auto bg-background border border-border rounded-lg h-9 px-2 text-xs font-extrabold text-foreground outline-none text-center flex w-[72px]">
+                                  <SelectValue placeholder="0%" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="0">0%</SelectItem>
+                                  <SelectItem value="5">5%</SelectItem>
+                                  <SelectItem value="12">12%</SelectItem>
+                                  <SelectItem value="18">18%</SelectItem>
+                                  <SelectItem value="28">28%</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </td>
 
                             {/* Discount Type & Value */}
                             <td className="py-3.5 px-2">
                               <div className="flex gap-1.5 items-center w-36 mx-auto">
-                                <select
-                                  value={item.discountType}
-                                  onChange={(e) => handleRowItemChange(item.id, "discountType", e.target.value)}
-                                  className="bg-background border border-border rounded-lg h-9 px-1 text-[10px] font-bold text-foreground outline-none"
-                                >
-                                  <option value="Percentage">%</option>
-                                  <option value="Flat">Val</option>
-                                </select>
+                                <div className="w-[64px]">
+                                  <Select value={item.discountType} onValueChange={(val) => handleRowItemChange(item.id, "discountType", val)}>
+                                    <SelectTrigger className="bg-background border border-border rounded-lg h-9 px-2 text-[10px] font-bold text-foreground outline-none flex w-full [&>span]:truncate">
+                                      <SelectValue placeholder="Type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Percentage">%</SelectItem>
+                                      <SelectItem value="Flat">Val</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
                                 <Input
                                   type="number"
                                   min={0}
                                   value={item.discountValue}
                                   onChange={(e) => handleRowItemChange(item.id, "discountValue", parseFloat(e.target.value) || 0)}
-                                  className="bg-background border-border rounded-xl h-9 text-xs font-bold font-mono text-right w-16"
+                                  className="bg-background border-border rounded-xl h-9 text-xs font-bold font-mono text-right flex-1 min-w-[50px] w-auto"
                                 />
                               </div>
                             </td>
@@ -2448,18 +2497,18 @@ export default function InvoicesPage() {
                   {/* Payment Mode */}
                   <div className="space-y-1.5">
                     <Label htmlFor="payModeSelect" className="text-xs font-bold text-foreground/80">Payment Mode</Label>
-                    <select
-                      id="payModeSelect"
-                      value={paymentMode}
-                      onChange={(e) => setPaymentMode(e.target.value as "Cash" | "UPI" | "Bank Transfer" | "Credit Card" | "None")}
-                      className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none"
-                    >
-                      <option value="None" className="bg-card text-foreground">None (Unpaid / Pending)</option>
-                      <option value="Cash" className="bg-card text-foreground">Cash</option>
-                      <option value="UPI" className="bg-card text-foreground">UPI (GPay/PhonePe/UTR)</option>
-                      <option value="Bank Transfer" className="bg-card text-foreground">Bank Transfer (NEFT/IMPS)</option>
-                      <option value="Credit Card" className="bg-card text-foreground">Credit Card</option>
-                    </select>
+                    <Select value={paymentMode} onValueChange={(val: any) => setPaymentMode(val)}>
+                      <SelectTrigger id="payModeSelect" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none">
+                        <SelectValue placeholder="Select Payment Mode" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="None">None (Unpaid / Pending)</SelectItem>
+                        <SelectItem value="Cash">Cash</SelectItem>
+                        <SelectItem value="UPI">UPI (GPay/PhonePe/UTR)</SelectItem>
+                        <SelectItem value="Bank Transfer">Bank Transfer (NEFT/IMPS)</SelectItem>
+                        <SelectItem value="Credit Card">Credit Card</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Transaction Ref */}
@@ -2996,21 +3045,19 @@ export default function InvoicesPage() {
             <form onSubmit={handleSaveTracking} className="p-6 space-y-5">
               <div className="space-y-2">
                 <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Dispatch Status</Label>
-                <div className="relative">
-                  <select 
-                    value={trackingStatus} 
-                    onChange={(e) => setTrackingStatus(e.target.value as any)}
-                    className="w-full h-11 px-4 rounded-xl border border-border bg-background focus:bg-background text-sm font-bold appearance-none transition-colors"
-                  >
-                    <option value="Pending">🕒 Pending Setup</option>
-                    <option value="Packed">📦 Packed / Ready</option>
-                    <option value="Dispatched">🚚 Dispatched</option>
-                    <option value="In Transit">🗺️ In Transit</option>
-                    <option value="Delivered">✅ Delivered</option>
-                    <option value="Returned">↩️ Returned</option>
-                  </select>
-                  <ChevronDown className="w-4 h-4 absolute right-4 top-3.5 pointer-events-none text-muted-foreground" />
-                </div>
+                <Select value={trackingStatus} onValueChange={(val: any) => setTrackingStatus(val)}>
+                  <SelectTrigger className="w-full h-11 px-4 rounded-xl border border-border bg-background focus:bg-background text-sm font-bold transition-colors [&>span]:truncate flex">
+                    <SelectValue placeholder="Select Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Pending">🕒 Pending Setup</SelectItem>
+                    <SelectItem value="Packed">📦 Packed / Ready</SelectItem>
+                    <SelectItem value="Dispatched">🚚 Dispatched</SelectItem>
+                    <SelectItem value="In Transit">🗺️ In Transit</SelectItem>
+                    <SelectItem value="Delivered">✅ Delivered</SelectItem>
+                    <SelectItem value="Returned">↩️ Returned</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -3104,20 +3151,18 @@ export default function InvoicesPage() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Mode</Label>
-                      <div className="relative">
-                        <select 
-                          value={payModeInput} 
-                          onChange={(e) => setPayModeInput(e.target.value as any)}
-                          className="w-full h-11 px-3 rounded-xl border border-border bg-background text-sm font-bold appearance-none transition-colors"
-                        >
-                          <option value="Cash">Cash</option>
-                          <option value="UPI">UPI</option>
-                          <option value="Bank Transfer">NEFT/IMPS</option>
-                          <option value="Credit Card">Credit Card</option>
-                          <option value="Cheque">Cheque</option>
-                        </select>
-                        <ChevronDown className="w-4 h-4 absolute right-3 top-3.5 pointer-events-none text-muted-foreground" />
-                      </div>
+                      <Select value={payModeInput} onValueChange={(val: any) => setPayModeInput(val)}>
+                        <SelectTrigger className="w-full h-11 px-3 rounded-xl border border-border bg-background text-sm font-bold transition-colors [&>span]:truncate flex">
+                          <SelectValue placeholder="Select Mode" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="Cash">Cash</SelectItem>
+                          <SelectItem value="UPI">UPI</SelectItem>
+                          <SelectItem value="Bank Transfer">NEFT/IMPS</SelectItem>
+                          <SelectItem value="Credit Card">Credit Card</SelectItem>
+                          <SelectItem value="Cheque">Cheque</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
                       <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Date</Label>

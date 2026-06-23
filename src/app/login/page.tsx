@@ -136,9 +136,18 @@ export default function LoginPage() {
       }, 600)
     } catch (err: any) {
       setIsLoading(false)
-      toast.error("Authentication Failed", {
-        description: err.message || "Invalid credentials. Please inspect passcode requirements."
-      })
+      const errorMessage = err.message || "Invalid credentials. Please inspect passcode requirements."
+      
+      if (errorMessage.toLowerCase().includes("suspended")) {
+        setFormErrors({ email: "Account suspended by administrator", password: "" })
+        toast.error("Account Suspended", {
+          description: errorMessage
+        })
+      } else {
+        toast.error("Authentication Failed", {
+          description: errorMessage
+        })
+      }
     }
   }
 

@@ -27,8 +27,16 @@ import {
   Dialog, 
   DialogContent, 
   DialogFooter, 
-  DialogTitle 
+  DialogTitle,
+  DialogDescription
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from "sonner"
 
 interface User {
@@ -41,8 +49,36 @@ interface User {
   isActive?: boolean;
 }
 
+const getInitials = (name: string) => {
+  const parts = name.trim().split(" ");
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return name.substring(0, 2).toUpperCase();
+};
+
+const getAvatarColor = (name: string) => {
+  const colors = [
+    "bg-blue-500", "bg-emerald-500", "bg-purple-500", 
+    "bg-amber-500", "bg-pink-500", "bg-indigo-500", "bg-rose-500"
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
+
+const getRoleBadgeClasses = (roleName?: string) => {
+  if (!roleName) return "bg-slate-500/10 text-slate-500 border-slate-500/20";
+  const name = roleName.toLowerCase();
+  if (name.includes("admin")) return "bg-purple-500/10 text-purple-600 border-purple-500/20";
+  if (name.includes("sales")) return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+  if (name.includes("accountant") || name.includes("finance")) return "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
+  return "bg-indigo-500/10 text-indigo-600 border-indigo-500/20";
+};
+
 export default function UsersPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [userPermissions, setUserPermissions] = useState<string[]>([])
   const [users, setUsers] = useState<User[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [isDialogOpen, setIsDialogOpen] = useState(false)
@@ -78,6 +114,22 @@ export default function UsersPage() {
   }
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
+        window.location.href = "/login"
+        return
+      }
+      try {
+        const userObj = JSON.parse(userStr)
+        const perms = userObj.permissions ? userObj.permissions.split(',') : []
+        setUserPermissions(perms)
+        if (!perms.includes("Users.CRUD")) {
+          window.location.href = "/" // Redirect if no view permission
+          return
+        }
+      } catch (e) {}
+    }
     fetchUsersAndRoles()
   }, [])
 
@@ -110,7 +162,8 @@ export default function UsersPage() {
 
     setIsSubmitting(true)
     try {
-      const payload: any = { name, email, roleId: roleId || null }
+      const finalRoleId = (roleId === "none" || !roleId) ? null : roleId
+      const payload: any = { name, email, roleId: finalRoleId }
       if (password) payload.password = password
 
       if (editingUserId) {
@@ -206,6 +259,12 @@ export default function UsersPage() {
     setIsDialogOpen(true)
   }
 
+  // --- Analytics Calculations ---
+  const totalUsers = users.length;
+  const activeUsers = users.filter(u => u.isActive !== false).length;
+  const suspendedUsers = users.filter(u => u.isActive === false).length;
+  const adminUsers = users.filter(u => u.roleName?.toLowerCase().includes("admin")).length;
+
   return (
     <div className="flex h-screen bg-background text-foreground font-sans selection:bg-primary/20 overflow-hidden">
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
@@ -227,24 +286,84 @@ export default function UsersPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <Button onClick={openCreateDialog} className="bg-primary hover:bg-primary/95 text-primary-foreground font-bold text-xs h-10 px-3 md:px-4 rounded-xl shadow-lg shadow-primary/20 transition-all">
-              <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-1.5" /> <span className="hidden md:inline">New User</span>
-            </Button>
+            {userPermissions.includes("Users.CRUD") && (
+              <Button onClick={openCreateDialog} className="bg-primary hover:bg-primary/95 text-primary-foreground font-bold text-xs h-10 px-3 md:px-4 rounded-xl shadow-lg shadow-primary/20 transition-all">
+                <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-1.5" /> <span className="hidden md:inline">New User</span>
+              </Button>
+            )}
           </div>
         </header>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          
+          {/* Top Level Analytics Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
+            
+            {/* Total Users Card */}
+            <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-primary/20 transition-all">
+              <CardContent className="p-6 flex items-center justify-between">
+                <div className="space-y-1.5">
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Total Users</span>
+                  <span className="text-3xl font-black text-foreground tracking-tight block">{totalUsers}</span>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-500 flex items-center justify-center">
+                  <Users className="w-6 h-6" />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Active / Suspended Card */}
+            <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-emerald-500/20 transition-all">
+              <CardContent className="p-6 flex items-center justify-between">
+                <div className="space-y-1.5">
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Status Overview</span>
+                  <div className="flex items-end gap-3">
+                    <span className="text-3xl font-black text-emerald-500 tracking-tight flex items-baseline gap-1">
+                      {activeUsers} <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider">Active</span>
+                    </span>
+                    {suspendedUsers > 0 && (
+                      <span className="text-lg font-bold text-red-500 flex items-baseline gap-1 mb-1">
+                        / {suspendedUsers} <span className="text-[10px] font-bold text-muted-foreground uppercase">Suspended</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center">
+                  <Power className="w-6 h-6" />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Admins Card */}
+            <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-purple-500/20 transition-all">
+              <CardContent className="p-6 flex items-center justify-between">
+                <div className="space-y-1.5">
+                  <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Admins & Managers</span>
+                  <span className="text-3xl font-black text-purple-500 tracking-tight block">{adminUsers}</span>
+                </div>
+                <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-500 flex items-center justify-center">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+              </CardContent>
+            </Card>
+
+          </div>
+
           <Card className="border border-border bg-card shadow-sm rounded-2xl overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/10">
-              <div className="relative w-full sm:w-64 group">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
+              <div className="relative w-full sm:w-80 group">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground group-focus-within:text-primary transition-colors" />
                 <Input 
-                  placeholder="Search users..." 
+                  placeholder="Search users by name or email..." 
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 h-10 bg-background border-border rounded-xl text-xs font-semibold focus-visible:ring-1 focus-visible:ring-primary transition-all"
+                  className="pl-10 h-10 bg-background border-border rounded-xl text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-primary focus-visible:border-primary transition-all"
                 />
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none opacity-50 hidden sm:flex">
+                  <kbd className="bg-muted border border-border rounded px-1.5 text-[10px] font-mono font-bold text-muted-foreground">⌘</kbd>
+                  <kbd className="bg-muted border border-border rounded px-1.5 text-[10px] font-mono font-bold text-muted-foreground">K</kbd>
+                </div>
               </div>
             </div>
 
@@ -252,8 +371,7 @@ export default function UsersPage() {
               <Table>
                 <TableHeader className="bg-muted/30">
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className="font-bold">Name</TableHead>
-                    <TableHead className="font-bold">Email</TableHead>
+                    <TableHead className="font-bold">User Profile</TableHead>
                     <TableHead className="font-bold">Role</TableHead>
                     <TableHead className="font-bold">Status</TableHead>
                     <TableHead className="font-bold">Created At</TableHead>
@@ -264,10 +382,20 @@ export default function UsersPage() {
                   {filteredUsers.length > 0 ? (
                     filteredUsers.map((u) => (
                       <TableRow key={u.id} className="hover:bg-muted/30 transition-colors">
-                        <TableCell className="font-semibold">{u.name}</TableCell>
-                        <TableCell className="font-mono text-xs">{u.email}</TableCell>
                         <TableCell>
-                          <span className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-primary/10 text-primary">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm ${getAvatarColor(u.name)}`}>
+                              {getInitials(u.name)}
+                            </div>
+                            <div className="flex flex-col">
+                              <span className="font-bold text-foreground text-sm leading-tight">{u.name}</span>
+                              <span className="text-[10px] font-medium text-muted-foreground">{u.email}</span>
+                            </div>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className={`inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${getRoleBadgeClasses(u.roleName)}`}>
+                            {u.roleName?.toLowerCase().includes("admin") && <span className="mr-1 text-xs">✦</span>}
                             {u.roleName || "No Role"}
                           </span>
                         </TableCell>
@@ -288,51 +416,72 @@ export default function UsersPage() {
                           })}
                         </TableCell>
                         <TableCell className="text-right space-x-1">
-                          <Button 
-                            variant="ghost" size="icon" 
-                            className={`w-8 h-8 rounded-lg transition-all ${u.isActive === false ? 'text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10' : 'text-amber-500 hover:text-amber-600 hover:bg-amber-500/10'}`}
-                            onClick={() => handleToggleStatus(u)}
-                            title={u.isActive === false ? "Activate User" : "Suspend User"}
-                          >
-                            <Power className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" size="icon" 
-                            className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                            onClick={() => openEditDialog(u)}
-                          >
-                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <path d="M12 20h9"></path>
-                              <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                            </svg>
-                          </Button>
-                          <Button 
-                            variant="ghost" size="icon" 
-                            className="w-8 h-8 rounded-lg text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition-all"
-                            onClick={() => {
-                              setResetTargetUser(u)
-                              setNewAdminPassword("")
-                              setIsResetPasswordOpen(true)
-                            }}
-                            title="Force Reset Password"
-                          >
-                            <Key className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" size="icon" 
-                            className="w-8 h-8 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-all"
-                            onClick={() => handleDelete(u.id, u.name)}
-                            title="Delete User"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
+                          {userPermissions.includes("Users.CRUD") && (
+                            <>
+                              <Button 
+                                variant="ghost" size="icon" 
+                                className={`w-8 h-8 rounded-lg transition-all ${u.isActive === false ? 'text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10' : 'text-amber-500 hover:text-amber-600 hover:bg-amber-500/10'}`}
+                                onClick={() => handleToggleStatus(u)}
+                                title={u.isActive === false ? "Activate User" : "Suspend User"}
+                              >
+                                <Power className="w-4 h-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" size="icon" 
+                                className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
+                                onClick={() => openEditDialog(u)}
+                              >
+                                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                  <path d="M12 20h9"></path>
+                                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
+                              </Button>
+                              <Button 
+                                variant="ghost" size="icon" 
+                                className="w-8 h-8 rounded-lg text-muted-foreground hover:text-blue-500 hover:bg-blue-500/10 transition-all"
+                                onClick={() => {
+                                  setResetTargetUser(u)
+                                  setNewAdminPassword("")
+                                  setIsResetPasswordOpen(true)
+                                }}
+                                title="Force Reset Password"
+                              >
+                                <Key className="w-4 h-4" />
+                              </Button>
+                              <Button 
+                                variant="ghost" size="icon" 
+                                className="w-8 h-8 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-all"
+                                onClick={() => handleDelete(u.id, u.name)}
+                                title="Delete User"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))
                   ) : (
-                    <TableRow>
-                      <TableCell colSpan={6} className="h-32 text-center text-muted-foreground text-sm font-medium">
-                        No users found.
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={6} className="h-64 text-center border-b-0">
+                        <div className="flex flex-col items-center justify-center space-y-4 max-w-sm mx-auto">
+                          <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center border border-border shadow-sm">
+                            <Search className="w-8 h-8 text-muted-foreground/50" />
+                          </div>
+                          <div className="space-y-1.5">
+                            <h3 className="text-base font-bold text-foreground">No users found</h3>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              We couldn't find any user matching your search. Try adjusting your keywords or create a new user profile.
+                            </p>
+                          </div>
+                          <Button 
+                            onClick={openCreateDialog}
+                            variant="outline"
+                            className="bg-background hover:bg-muted text-xs font-bold rounded-xl mt-2 border-border shadow-sm"
+                          >
+                            <Plus className="w-4 h-4 mr-1.5" /> Add New User
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   )}
@@ -350,6 +499,7 @@ export default function UsersPage() {
             <DialogTitle className="text-sm font-extrabold tracking-wider uppercase">
               {editingUserId ? "Edit User Details" : "Add New User"}
             </DialogTitle>
+            <DialogDescription className="hidden">Fill out the form below to manage user details.</DialogDescription>
           </div>
           
           <form onSubmit={handleSubmit} className="p-6 space-y-4">
@@ -399,15 +549,17 @@ export default function UsersPage() {
 
             <div className="space-y-1.5">
               <Label className="text-xs font-bold text-foreground/80 uppercase tracking-widest">Assign Role</Label>
-              <select 
-                value={roleId} onChange={(e) => setRoleId(e.target.value)}
-                className="w-full h-11 px-3 rounded-xl border border-border bg-background text-sm font-semibold outline-none focus:ring-1 focus:ring-primary"
-              >
-                <option value="">No Role (Restricted Access)</option>
-                {availableRoles.map(r => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
-              </select>
+              <Select value={roleId || "none"} onValueChange={(val) => setRoleId(val)}>
+                <SelectTrigger className="w-full h-11 px-3 rounded-xl border border-border bg-background text-sm font-semibold outline-none focus:ring-1 focus:ring-primary">
+                  <SelectValue placeholder="No Role (Restricted Access)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No Role (Restricted Access)</SelectItem>
+                  {availableRoles.map(r => (
+                    <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="pt-4 flex flex-col-reverse sm:flex-row justify-end gap-3 border-t border-border mt-6">
@@ -426,6 +578,7 @@ export default function UsersPage() {
       <Dialog open={isResetPasswordOpen} onOpenChange={setIsResetPasswordOpen}>
         <DialogContent className="sm:max-w-[400px] rounded-2xl bg-card border-border shadow-2xl p-6">
           <DialogTitle className="text-xl font-black text-foreground">Reset Password</DialogTitle>
+          <DialogDescription className="hidden">Set a new password for the user.</DialogDescription>
           <div className="py-2 space-y-4">
             <p className="text-xs text-muted-foreground leading-relaxed">
               Set a new password for <span className="font-bold text-foreground text-sm">{resetTargetUser?.name}</span>. They will be able to log in with this new password immediately without requiring an email reset link.

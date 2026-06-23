@@ -12,7 +12,15 @@ import {
   Moon,
   Sun,
   ShieldCheck,
-  Download
+  Download,
+  Mail,
+  MapPin,
+  Hash,
+  Landmark,
+  FileDigit,
+  Smartphone,
+  Trash2,
+  AlertCircle
 } from "lucide-react"
 
 import Sidebar from "@/components/Sidebar"
@@ -20,6 +28,13 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from "sonner"
 
 export default function SettingsPage() {
@@ -27,6 +42,8 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState("company")
   const [isSaving, setIsSaving] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false)
 
   // Settings State
   const [companyName, setCompanyName] = useState("Acme Corp Ltd.")
@@ -54,6 +71,20 @@ export default function SettingsPage() {
       const savedTheme = localStorage.getItem("invoice_management_theme") as "light" | "dark" | null
       if (savedTheme) setTheme(savedTheme)
 
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
+        window.location.href = "/login"
+        return
+      }
+      try {
+        const userObj = JSON.parse(userStr)
+        const perms = userObj.permissions ? userObj.permissions.split(',') : []
+        if (!perms.includes("Settings.CRUD")) {
+          window.location.href = "/" // Redirect if no permission
+          return
+        }
+      } catch (e) {}
+
       const savedSidebarColor = localStorage.getItem("sidebar_color")
       if (savedSidebarColor) setSidebarColor(savedSidebarColor)
 
@@ -73,11 +104,19 @@ export default function SettingsPage() {
           if (parsed.bankIfscCode !== undefined) setBankIfscCode(parsed.bankIfscCode)
           if (parsed.upiId !== undefined) setUpiId(parsed.upiId)
         }
+        setTimeout(() => setInitialDataLoaded(true), 500)
       }).catch(err => {
         console.warn("Failed to load settings from backend", err)
+        setTimeout(() => setInitialDataLoaded(true), 500)
       })
     }
   }, [])
+
+  useEffect(() => {
+    if (initialDataLoaded) {
+      setHasUnsavedChanges(true)
+    }
+  }, [companyName, taxId, address, contactEmail, currency, invoicePrefix, paymentTerms, companyLogo, authorizedSignature, bankName, bankAccountNumber, bankIfscCode, upiId, theme, sidebarColor])
 
   const handleSave = async () => {
     setIsSaving(true)
@@ -95,6 +134,7 @@ export default function SettingsPage() {
       }
       
       await api.settings.update(settingsObj)
+      setHasUnsavedChanges(false)
 
       toast.success("Settings Saved Successfully", {
         description: "Your workspace preferences have been updated in the database."
@@ -222,6 +262,11 @@ export default function SettingsPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
+            {hasUnsavedChanges && (
+              <span className="hidden sm:flex text-[10px] font-bold text-amber-500 bg-amber-500/10 px-2.5 py-1.5 rounded-lg border border-amber-500/20 items-center gap-1.5 animate-pulse">
+                <AlertCircle className="w-3 h-3" /> Unsaved Changes
+              </span>
+            )}
             <Button 
               onClick={handleSave} 
               disabled={isSaving}
@@ -312,7 +357,16 @@ export default function SettingsPage() {
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Company Logo</Label>
                         <div className="relative group rounded-2xl border-2 border-dashed border-border hover:border-primary/50 bg-transparent hover:bg-primary/5 transition-all duration-300 flex flex-col items-center justify-center p-6 h-48 cursor-pointer">
                           {companyLogo ? (
-                            <img src={companyLogo} alt="Logo" className="max-w-full max-h-full object-contain drop-shadow-md transition-transform group-hover:scale-105" />
+                            <>
+                              <img src={companyLogo} alt="Logo" className="max-w-full max-h-full object-contain drop-shadow-md transition-transform group-hover:scale-105" />
+                              <Button 
+                                type="button" variant="destructive" size="icon" 
+                                className="absolute top-2 right-2 z-10 w-8 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setCompanyLogo(""); }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
                           ) : (
                             <div className="flex flex-col items-center text-center space-y-2">
                               <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-2">
@@ -337,7 +391,16 @@ export default function SettingsPage() {
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Digital Signature</Label>
                         <div className="relative group rounded-2xl border-2 border-dashed border-border hover:border-emerald-500/50 bg-transparent hover:bg-emerald-500/5 transition-all duration-300 flex flex-col items-center justify-center p-6 h-48 cursor-pointer">
                           {authorizedSignature ? (
-                            <img src={authorizedSignature} alt="Signature" className="max-w-full max-h-full object-contain drop-shadow-md transition-transform group-hover:scale-105" />
+                            <>
+                              <img src={authorizedSignature} alt="Signature" className="max-w-full max-h-full object-contain drop-shadow-md transition-transform group-hover:scale-105" />
+                              <Button 
+                                type="button" variant="destructive" size="icon" 
+                                className="absolute top-2 right-2 z-10 w-8 h-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setAuthorizedSignature(""); }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </>
                           ) : (
                             <div className="flex flex-col items-center text-center space-y-2">
                               <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-500 flex items-center justify-center mb-2">
@@ -365,19 +428,31 @@ export default function SettingsPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Business Name</Label>
-                        <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        <div className="relative">
+                          <Building className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={companyName} onChange={(e) => setCompanyName(e.target.value)} className="pl-11 h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Tax ID / GSTIN</Label>
-                        <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} className="h-12 rounded-xl text-sm font-bold font-mono bg-transparent border-border focus:bg-background transition-colors uppercase" />
+                        <div className="relative">
+                          <FileDigit className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={taxId} onChange={(e) => setTaxId(e.target.value)} className="pl-11 h-12 rounded-xl text-sm font-bold font-mono bg-transparent border-border focus:bg-background transition-colors uppercase" />
+                        </div>
                       </div>
                       <div className="space-y-2 md:col-span-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Registered Address</Label>
-                        <Input value={address} onChange={(e) => setAddress(e.target.value)} className="h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        <div className="relative">
+                          <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={address} onChange={(e) => setAddress(e.target.value)} className="pl-11 h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        </div>
                       </div>
                       <div className="space-y-2 md:col-span-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Contact Email</Label>
-                        <Input value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        <div className="relative">
+                          <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} className="pl-11 h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -394,35 +469,38 @@ export default function SettingsPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Default Currency</Label>
-                        <div className="relative">
-                          <select value={currency} onChange={(e) => setCurrency(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-border bg-transparent focus:bg-background text-sm font-bold appearance-none transition-colors">
-                            <option value="INR">INR - Indian Rupee</option>
-                            <option value="USD">USD - US Dollar</option>
-                            <option value="EUR">EUR - Euro</option>
-                            <option value="GBP">GBP - British Pound</option>
-                          </select>
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                          </div>
-                        </div>
+                        <Select value={currency} onValueChange={setCurrency}>
+                          <SelectTrigger className="w-full h-12 px-4 rounded-xl border border-border bg-transparent focus:bg-background text-sm font-bold transition-colors [&>span]:truncate flex">
+                            <SelectValue placeholder="Select Currency" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="INR">INR - Indian Rupee</SelectItem>
+                            <SelectItem value="USD">USD - US Dollar</SelectItem>
+                            <SelectItem value="EUR">EUR - Euro</SelectItem>
+                            <SelectItem value="GBP">GBP - British Pound</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Invoice Prefix</Label>
-                        <Input value={invoicePrefix} onChange={(e) => setInvoicePrefix(e.target.value)} className="h-12 rounded-xl text-sm font-bold font-mono bg-transparent border-border focus:bg-background transition-colors uppercase" />
+                        <div className="relative">
+                          <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={invoicePrefix} onChange={(e) => setInvoicePrefix(e.target.value)} className="pl-11 h-12 rounded-xl text-sm font-bold font-mono bg-transparent border-border focus:bg-background transition-colors uppercase" />
+                        </div>
                       </div>
                       <div className="space-y-2 md:col-span-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Default Payment Terms</Label>
-                        <div className="relative">
-                          <select value={paymentTerms} onChange={(e) => setPaymentTerms(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-border bg-transparent focus:bg-background text-sm font-bold appearance-none transition-colors">
-                            <option value="Due on Receipt">Due on Receipt (Immediate)</option>
-                            <option value="Net 15">Net 15 Days</option>
-                            <option value="Net 30">Net 30 Days</option>
-                            <option value="Net 60">Net 60 Days</option>
-                          </select>
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                          </div>
-                        </div>
+                        <Select value={paymentTerms} onValueChange={setPaymentTerms}>
+                          <SelectTrigger className="w-full h-12 px-4 rounded-xl border border-border bg-transparent focus:bg-background text-sm font-bold transition-colors [&>span]:truncate flex">
+                            <SelectValue placeholder="Select Terms" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Due on Receipt">Due on Receipt (Immediate)</SelectItem>
+                            <SelectItem value="Net 15">Net 15 Days</SelectItem>
+                            <SelectItem value="Net 30">Net 30 Days</SelectItem>
+                            <SelectItem value="Net 60">Net 60 Days</SelectItem>
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
                   </div>
@@ -432,15 +510,24 @@ export default function SettingsPage() {
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Bank Name</Label>
-                        <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="e.g. HDFC Bank" className="h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        <div className="relative">
+                          <Landmark className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="e.g. HDFC Bank" className="pl-11 h-12 rounded-xl text-sm font-bold bg-transparent border-border focus:bg-background transition-colors" />
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">Account Number</Label>
-                        <Input value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} placeholder="50100200300400" className="h-12 rounded-xl text-sm font-bold font-mono tracking-widest bg-transparent border-border focus:bg-background transition-colors" />
+                        <div className="relative">
+                          <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} placeholder="50100200300400" className="pl-11 h-12 rounded-xl text-sm font-bold font-mono tracking-widest bg-transparent border-border focus:bg-background transition-colors" />
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">IFSC Code</Label>
-                        <Input value={bankIfscCode} onChange={(e) => setBankIfscCode(e.target.value)} placeholder="HDFC0001234" className="h-12 rounded-xl text-sm font-bold font-mono uppercase bg-transparent border-border focus:bg-background transition-colors" />
+                        <div className="relative">
+                          <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                          <Input value={bankIfscCode} onChange={(e) => setBankIfscCode(e.target.value)} placeholder="HDFC0001234" className="pl-11 h-12 rounded-xl text-sm font-bold font-mono uppercase bg-transparent border-border focus:bg-background transition-colors" />
+                        </div>
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs font-black text-foreground/70 uppercase tracking-widest">UPI ID (VPA)</Label>

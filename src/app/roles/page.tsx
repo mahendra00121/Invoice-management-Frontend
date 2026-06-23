@@ -92,6 +92,13 @@ const PERMISSION_MODULES = [
       { id: "Roles.CRUD", label: "Role Management" },
       { id: "Settings.CRUD", label: "System Settings" }
     ]
+  },
+  {
+    module: "Audit Logs",
+    description: "Track system activity and user actions.",
+    permissions: [
+      { id: "AuditLogs.View", label: "View Audit Trail" }
+    ]
   }
 ]
 
@@ -123,6 +130,21 @@ export default function RolesPage() {
   }
 
   useEffect(() => {
+    if (typeof window !== "undefined") {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
+        window.location.href = "/login"
+        return
+      }
+      try {
+        const userObj = JSON.parse(userStr)
+        const perms = userObj.permissions ? userObj.permissions.split(',') : []
+        if (!perms.includes("Roles.CRUD")) {
+          window.location.href = "/" // Redirect if no permission
+          return
+        }
+      } catch (e) {}
+    }
     fetchRoles()
   }, [])
 
@@ -339,8 +361,27 @@ export default function RolesPage() {
                         )
                       })
                     ) : (
-                      <TableRow>
-                        <TableCell colSpan={4} className="h-32 text-center text-sm font-bold text-muted-foreground">No roles found matching "{searchQuery}"</TableCell>
+                      <TableRow className="hover:bg-transparent">
+                        <TableCell colSpan={4} className="h-64 text-center border-b-0">
+                          <div className="flex flex-col items-center justify-center space-y-4 max-w-sm mx-auto">
+                            <div className="w-16 h-16 rounded-2xl bg-muted/50 flex items-center justify-center border border-border shadow-sm">
+                              <ShieldAlert className="w-8 h-8 text-muted-foreground/50" />
+                            </div>
+                            <div className="space-y-1.5">
+                              <h3 className="text-base font-bold text-foreground">No roles found</h3>
+                              <p className="text-xs text-muted-foreground leading-relaxed">
+                                We couldn't find any roles matching "{searchQuery}". Try adjusting your keywords or create a new custom role.
+                              </p>
+                            </div>
+                            <Button 
+                              onClick={openCreateDialog}
+                              variant="outline"
+                              className="bg-background hover:bg-muted text-xs font-bold rounded-xl mt-2 border-border shadow-sm"
+                            >
+                              <Plus className="w-4 h-4 mr-1.5" /> Create Custom Role
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     )}
                   </TableBody>
@@ -474,7 +515,7 @@ export default function RolesPage() {
             <p className="text-[11px] font-semibold text-muted-foreground hidden sm:block">
               Changes apply instantly to all users assigned to this role.
             </p>
-            <div className="flex gap-3 w-full sm:w-auto">
+            <div className="flex flex-col-reverse sm:flex-row gap-3 w-full sm:w-auto">
               <Button variant="outline" onClick={() => setIsDialogOpen(false)} className="font-bold rounded-xl h-11 px-6 w-full sm:w-auto hover:bg-muted">Cancel</Button>
               <Button onClick={handleSave} className="bg-primary hover:bg-primary/95 text-primary-foreground shadow-lg shadow-primary/20 font-bold rounded-xl h-11 px-8 w-full sm:w-auto">
                 {editingRole ? "Update Role" : "Create Role"}

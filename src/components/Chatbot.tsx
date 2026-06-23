@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { MessageSquare, X, Send, Bot, Mic, Phone } from "lucide-react";
+import { MessageSquare, X, Send, Bot, Mic, Phone, Volume2, VolumeX, Maximize2, Minimize2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 type Message = {
@@ -10,6 +10,26 @@ type Message = {
   sender: "user" | "bot";
   widgetType?: "OVERDUE" | "SALES" | null;
   widgetData?: any;
+  isNew?: boolean;
+};
+
+const TypewriterText = ({ text }: { text: string }) => {
+  const [displayedText, setDisplayedText] = useState("");
+  
+  useEffect(() => {
+    let i = 0;
+    const interval = setInterval(() => {
+      setDisplayedText(text.slice(0, i + 1));
+      i++;
+      if (i > text.length) {
+        clearInterval(interval);
+      }
+    }, 25); // 25ms per character typing speed
+    
+    return () => clearInterval(interval);
+  }, [text]);
+
+  return <span>{displayedText}</span>;
 };
 
 export function Chatbot() {
@@ -25,7 +45,41 @@ export function Chatbot() {
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isVoiceEnabled, setIsVoiceEnabled] = useState(true);
+  const [isFullScreen, setIsFullScreen] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const speakText = (text: string) => {
+    if (!isVoiceEnabled || typeof window === "undefined") return;
+    
+    // Stop any ongoing speech
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    
+    // Prefer Indian English or Hindi voices for a natural tone
+    const indianVoice = voices.find(v => v.lang.includes('hi-IN') || v.lang.includes('en-IN'));
+    if (indianVoice) {
+      utterance.voice = indianVoice;
+    } else {
+      utterance.lang = 'hi-IN';
+    }
+    
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+    
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // Load voices when component mounts (to fix blank voices on first load)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      window.speechSynthesis.onvoiceschanged = () => {
+        window.speechSynthesis.getVoices();
+      };
+    }
+  }, []);
 
   useEffect(() => {
     const saved = localStorage.getItem("vyapaar_chat_history");
@@ -39,7 +93,9 @@ export function Chatbot() {
 
   useEffect(() => {
     if (isLoaded && messages.length > 0) {
-      localStorage.setItem("vyapaar_chat_history", JSON.stringify(messages));
+      // Save to localStorage but set isNew to false so it doesn't type again on reload
+      const msgsToSave = messages.map(m => ({ ...m, isNew: false }));
+      localStorage.setItem("vyapaar_chat_history", JSON.stringify(msgsToSave));
     }
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping, isLoaded]);
@@ -68,6 +124,7 @@ export function Chatbot() {
   };
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (isFullScreen) return;
     setIsDragging(true);
     dragRef.current = { startX: e.clientX - position.x, startY: e.clientY - position.y };
   };
@@ -231,15 +288,45 @@ export function Chatbot() {
         botResponse = "Payment record karne ya Pauti (Receipt) print karne ke liye Invoices page khol raha hu. Kisi bhi bill ke aage 💰 icon par click kijiye.";
         router.push('/invoices');
       } 
-      // Intent 6: Products & Stock
+      // Intent 6: Add Product / Stock
+      else if (text.match(/product add|add product|naya item|new item|stock add/i)) {
+        botResponse = "Products page open kar raha hu aur 'Add New Product' ka form khol raha hu. 📦";
+        if (window.location.pathname !== '/products') {
+          router.push('/products');
+          setTimeout(() => window.dispatchEvent(new CustomEvent('BOT_ACTION_CREATE_PRODUCT')), 800);
+        } else {
+          window.dispatchEvent(new CustomEvent('BOT_ACTION_CREATE_PRODUCT'));
+        }
+      }
+      // Intent 6.5: View Products
       else if (text.match(/product|stock|item|maal|inventory/i)) {
         botResponse = "Aapke saare products aur stock ki list khol raha hu. Yahan se aap stock check ya update kar sakte hain. 📦";
         router.push('/products');
       }
-      // Intent 7: Customers / Parties
+      // Intent 7: Add Customer
+      else if (text.match(/customer add|add customer|naya customer|new client|party bana|naya log/i)) {
+        botResponse = "Customer page open kar raha hu aur 'Add New Customer' ka form khol raha hu. 👥";
+        if (window.location.pathname !== '/customers') {
+          router.push('/customers');
+          setTimeout(() => window.dispatchEvent(new CustomEvent('BOT_ACTION_CREATE_CUSTOMER')), 800);
+        } else {
+          window.dispatchEvent(new CustomEvent('BOT_ACTION_CREATE_CUSTOMER'));
+        }
+      }
+      // Intent 7.5: View Customers
       else if (text.match(/customer|party|client|log/i)) {
         botResponse = "Aapke saare customers aur parties ki list open kar raha hu. 👥";
         router.push('/customers');
+      }
+      // Intent 8: Settings
+      else if (text.match(/settings|setting|bank details|logo|profile|password/i)) {
+        botResponse = "Workspace Settings khol raha hu. Yahan se aap apne bank details aur logo update kar sakte hain. ⚙️";
+        router.push('/settings');
+      }
+      // Intent 9: Reports
+      else if (text.match(/report|analytics|business report/i)) {
+        botResponse = "Business Reports page khol raha hu. Yahan aap apna detailed hisaab dekh sakte hain. 📊";
+        router.push('/reports');
       }
       // Greetings
       else if (text.match(/hello|hi|namaste|aur bhai|kya haal/i)) {
@@ -251,9 +338,13 @@ export function Chatbot() {
         text: botResponse, 
         sender: "bot", 
         widgetType: botWidgetType,
-        widgetData: botWidgetData 
+        widgetData: botWidgetData,
+        isNew: true
       };
       setMessages(prev => [...prev, botMsg]);
+      
+      // Speak the response aloud!
+      speakText(botResponse);
     }, 800);
   };
 
@@ -261,7 +352,12 @@ export function Chatbot() {
     <>
       {/* Floating Button */}
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          setIsOpen(!isOpen);
+          if (isOpen && typeof window !== "undefined") {
+            window.speechSynthesis.cancel();
+          }
+        }}
         className={`fixed bottom-6 right-6 p-4 rounded-full shadow-2xl transition-all duration-300 z-[100] ${isOpen ? "bg-rose-500 hover:bg-rose-600 rotate-90" : "bg-indigo-600 hover:bg-indigo-700 hover:scale-110"}`}
       >
         {isOpen ? <X className="w-6 h-6 text-white" /> : <MessageSquare className="w-6 h-6 text-white" />}
@@ -270,12 +366,16 @@ export function Chatbot() {
       {/* Chat Window */}
       {isOpen && (
         <div 
-          className="fixed bottom-24 right-6 w-[350px] h-[500px] max-h-[80vh] bg-card border border-border shadow-2xl rounded-2xl flex flex-col z-[100] animate-in slide-in-from-bottom-5"
-          style={{ transform: `translate(${position.x}px, ${position.y}px)`, transition: isDragging ? 'none' : 'transform 0.1s ease-out' }}
+          className={`fixed flex flex-col z-[100] animate-in slide-in-from-bottom-5 bg-card border border-border shadow-2xl transition-all ${
+            isFullScreen 
+              ? "inset-0 w-full h-full rounded-none" 
+              : "bottom-24 right-6 w-[350px] sm:w-[400px] h-[550px] max-h-[85vh] rounded-2xl"
+          }`}
+          style={{ transform: isFullScreen ? 'none' : `translate(${position.x}px, ${position.y}px)`, transition: isDragging ? 'none' : 'transform 0.1s ease-out' }}
         >
           {/* Header */}
           <div 
-            className="p-4 border-b border-border bg-indigo-600 rounded-t-2xl flex items-center justify-between cursor-move select-none"
+            className={`p-4 border-b border-border bg-indigo-600 flex items-center justify-between select-none ${isFullScreen ? 'rounded-none' : 'rounded-t-2xl'} ${isFullScreen ? '' : 'cursor-move'}`}
             onMouseDown={handleMouseDown}
           >
             <div className="flex items-center gap-3">
@@ -287,13 +387,32 @@ export function Chatbot() {
                 <p className="text-indigo-100 text-xs">Aapka Smart Assistant</p>
               </div>
             </div>
-            <button 
-              onClick={clearChat}
-              className="text-xs text-indigo-100 hover:text-white px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors"
-              title="Clear Chat History"
-            >
-              Clear
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setIsFullScreen(!isFullScreen)}
+                className="text-xs text-indigo-100 hover:text-white px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors flex items-center justify-center"
+                title={isFullScreen ? "Minimize Chat" : "Expand to Full Screen"}
+              >
+                {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+              <button
+                onClick={() => {
+                  setIsVoiceEnabled(!isVoiceEnabled);
+                  if (isVoiceEnabled && typeof window !== "undefined") window.speechSynthesis.cancel();
+                }}
+                className="text-xs text-indigo-100 hover:text-white px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors flex items-center justify-center"
+                title={isVoiceEnabled ? "Mute Voice Reply" : "Enable Voice Reply"}
+              >
+                {isVoiceEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+              </button>
+              <button 
+                onClick={clearChat}
+                className="text-xs text-indigo-100 hover:text-white px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors"
+                title="Clear Chat History"
+              >
+                Clear
+              </button>
+            </div>
           </div>
 
           {/* Messages */}
@@ -314,7 +433,11 @@ export function Chatbot() {
                     ? "bg-indigo-600 text-white rounded-br-none" 
                     : "bg-background border border-border text-foreground rounded-bl-none shadow-sm"
                 }`}>
-                  {msg.text}
+                  {msg.sender === "bot" && msg.isNew ? (
+                    <TypewriterText text={msg.text} />
+                  ) : (
+                    msg.text
+                  )}
                   
                   {/* Render OVERDUE Widget */}
                   {msg.widgetType === "OVERDUE" && msg.widgetData && (

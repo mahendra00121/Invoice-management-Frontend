@@ -9,7 +9,10 @@ import {
   Calendar,
   Filter,
   RefreshCw,
-  BarChart2
+  BarChart2,
+  TrendingUp,
+  CheckCircle,
+  AlertCircle
 } from "lucide-react"
 import {
   BarChart,
@@ -32,6 +35,13 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from "sonner"
 
 type ReportType = "DASHBOARD_OVERVIEW" | "SALES_SUMMARY" | "PAYMENT_COLLECTIONS" | "OUTSTANDING_INVOICES" | "TOP_PRODUCTS"
@@ -83,6 +93,13 @@ export default function ReportsPage() {
     setEndDate(today.toISOString().split("T")[0])
   }, [])
 
+  const resetToThisMonth = () => {
+    const today = new Date()
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1)
+    setStartDate(firstDay.toISOString().split("T")[0])
+    setEndDate(today.toISOString().split("T")[0])
+  }
+
   // Auto-fetch when type or dates change if they are valid
   useEffect(() => {
     if (startDate && endDate && reportType !== "DASHBOARD_OVERVIEW" && reportType !== "TOP_PRODUCTS") {
@@ -100,6 +117,20 @@ export default function ReportsPage() {
 
   const formatCurrency = (amount: number) => {
     return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(amount)
+  }
+
+  const getStatusBadgeClasses = (status: string) => {
+    const s = (status || "").toLowerCase();
+    if (s.includes("paid") || s.includes("completed") || s.includes("success")) {
+      return "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20";
+    }
+    if (s.includes("pending") || s.includes("partial")) {
+      return "bg-amber-500/10 text-amber-600 border border-amber-500/20";
+    }
+    if (s.includes("overdue") || s.includes("cancelled") || s.includes("failed")) {
+      return "bg-rose-500/10 text-rose-600 border border-rose-500/20";
+    }
+    return "bg-muted text-muted-foreground border border-border";
   }
 
   const handlePrint = () => {
@@ -225,6 +256,33 @@ export default function ReportsPage() {
       .sort((a, b) => b.revenue - a.revenue);
   }, [allInvoices, startDate, endDate, reportType]);
 
+  // Top Level KPI Metrics
+  const kpiMetrics = React.useMemo(() => {
+    const start = startDate ? new Date(startDate) : new Date(0);
+    const end = endDate ? new Date(endDate) : new Date();
+    end.setHours(23, 59, 59, 999);
+
+    let totalInvoiced = 0;
+    let totalOutstanding = 0;
+    allInvoices.forEach(inv => {
+      const d = new Date(inv.invoiceDate || inv.createdAt);
+      if (d >= start && d <= end) {
+        totalInvoiced += (inv.grandTotal || 0);
+        totalOutstanding += (inv.balanceAmount || 0);
+      }
+    });
+
+    let totalCollected = 0;
+    allPayments.forEach(pay => {
+      const d = new Date(pay.paymentDate || pay.createdAt);
+      if (d >= start && d <= end) {
+        totalCollected += (pay.amount || 0);
+      }
+    });
+
+    return { totalInvoiced, totalCollected, totalOutstanding };
+  }, [allInvoices, allPayments, startDate, endDate]);
+
   return (
     <div className="flex h-screen bg-background text-foreground font-sans selection:bg-primary/20 overflow-hidden">
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
@@ -258,6 +316,48 @@ export default function ReportsPage() {
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <div className="max-w-6xl mx-auto space-y-6">
             
+            {/* KPI Metric Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 print:hidden animate-fadeIn">
+              {/* Total Invoiced */}
+              <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-blue-500/20 transition-all">
+                <CardContent className="p-6 flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Total Invoiced</span>
+                    <span className="text-3xl font-black text-foreground tracking-tight block">{formatCurrency(kpiMetrics.totalInvoiced)}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-500 flex items-center justify-center">
+                    <TrendingUp className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Total Collected */}
+              <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-emerald-500/20 transition-all">
+                <CardContent className="p-6 flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Total Collected</span>
+                    <span className="text-3xl font-black text-emerald-500 tracking-tight block">{formatCurrency(kpiMetrics.totalCollected)}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center">
+                    <CheckCircle className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Total Outstanding */}
+              <Card className="border-border bg-card shadow-sm rounded-2xl hover:border-amber-500/20 transition-all">
+                <CardContent className="p-6 flex items-center justify-between">
+                  <div className="space-y-1.5">
+                    <span className="text-xs font-bold text-muted-foreground uppercase tracking-wider block">Outstanding Balance</span>
+                    <span className="text-3xl font-black text-amber-500 tracking-tight block">{formatCurrency(kpiMetrics.totalOutstanding)}</span>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 flex items-center justify-center">
+                    <AlertCircle className="w-6 h-6" />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
             {/* Filter Controls */}
             <Card className="border border-border bg-card shadow-sm rounded-2xl overflow-hidden print:hidden animate-fadeIn">
               <div className="p-4 border-b border-border bg-muted/10 flex items-center gap-2">
@@ -268,17 +368,18 @@ export default function ReportsPage() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                   <div className="space-y-2 md:col-span-2">
                     <label className="text-xs font-bold text-foreground/80 uppercase tracking-widest">Report Type</label>
-                    <select 
-                      value={reportType} 
-                      onChange={(e) => setReportType(e.target.value as ReportType)}
-                      className="w-full h-11 px-3 rounded-xl border border-border bg-background text-sm font-semibold outline-none focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="DASHBOARD_OVERVIEW">Dashboard Overview (Charts & Analytics)</option>
-                      <option value="SALES_SUMMARY">Sales Summary (Invoices Issued)</option>
-                      <option value="PAYMENT_COLLECTIONS">Payment Collections (Revenue Received)</option>
-                      <option value="OUTSTANDING_INVOICES">Outstanding Balances (Pending Dues)</option>
-                      <option value="TOP_PRODUCTS">Top Selling Products (Performance)</option>
-                    </select>
+                    <Select value={reportType} onValueChange={(val: ReportType) => setReportType(val)}>
+                      <SelectTrigger className="w-full h-11 px-3 rounded-xl border border-border bg-background text-sm font-semibold outline-none focus:ring-1 focus:ring-primary [&>span]:truncate flex">
+                        <SelectValue placeholder="Select Report Type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="DASHBOARD_OVERVIEW">Dashboard Overview (Charts & Analytics)</SelectItem>
+                        <SelectItem value="SALES_SUMMARY">Sales Summary (Invoices Issued)</SelectItem>
+                        <SelectItem value="PAYMENT_COLLECTIONS">Payment Collections (Revenue Received)</SelectItem>
+                        <SelectItem value="OUTSTANDING_INVOICES">Outstanding Balances (Pending Dues)</SelectItem>
+                        <SelectItem value="TOP_PRODUCTS">Top Selling Products (Performance)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-2">
                     <label className="text-xs font-bold text-foreground/80 uppercase tracking-widest flex items-center gap-1">Start Date</label>
@@ -540,10 +641,18 @@ export default function ReportsPage() {
                         ))
                       ) : (
                         <TableRow>
-                          <TableCell colSpan={4} className="h-40 text-center">
-                            <div className="flex flex-col items-center justify-center text-muted-foreground">
-                              <FileSpreadsheet className="w-8 h-8 opacity-20 mb-2" />
-                              <span className="text-sm font-semibold">No products sold in this period.</span>
+                          <TableCell colSpan={4} className="h-[400px]">
+                            <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                              <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                                <FileSpreadsheet className="w-10 h-10 text-muted-foreground opacity-50" />
+                              </div>
+                              <h3 className="text-xl font-black text-foreground mb-2">No Products Sold</h3>
+                              <p className="text-sm text-muted-foreground mb-6">
+                                There are no top-selling products matching your current date filters.
+                              </p>
+                              <Button onClick={resetToThisMonth} variant="outline" className="font-bold">
+                                Reset to This Month
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -557,7 +666,7 @@ export default function ReportsPage() {
                           <TableCell className="font-bold text-sm">{row.reference}</TableCell>
                           <TableCell className="font-semibold text-sm max-w-[200px] truncate" title={row.entity}>{row.entity}</TableCell>
                           <TableCell>
-                            <span className="inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-muted text-muted-foreground">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${getStatusBadgeClasses(row.status)}`}>
                               {row.status}
                             </span>
                           </TableCell>
@@ -568,13 +677,24 @@ export default function ReportsPage() {
                       ))
                     ) : (
                       <TableRow>
-                        <TableCell colSpan={5} className="h-40 text-center">
+                        <TableCell colSpan={5} className="h-[400px]">
                           {isLoading ? (
-                            <span className="text-sm font-semibold text-muted-foreground animate-pulse">Running analytics engine...</span>
+                            <div className="flex flex-col items-center justify-center h-full">
+                              <RefreshCw className="w-8 h-8 text-primary animate-spin mb-4" />
+                              <span className="text-sm font-semibold text-muted-foreground animate-pulse">Running analytics engine...</span>
+                            </div>
                           ) : (
-                            <div className="flex flex-col items-center justify-center text-muted-foreground">
-                              <FileSpreadsheet className="w-8 h-8 opacity-20 mb-2" />
-                              <span className="text-sm font-semibold">No records found for this period.</span>
+                            <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                              <div className="w-20 h-20 rounded-full bg-muted/50 flex items-center justify-center mb-4">
+                                <FileSpreadsheet className="w-10 h-10 text-muted-foreground opacity-50" />
+                              </div>
+                              <h3 className="text-xl font-black text-foreground mb-2">No Data Available</h3>
+                              <p className="text-sm text-muted-foreground mb-6">
+                                Try adjusting your date filters or report type to find the records you're looking for.
+                              </p>
+                              <Button onClick={resetToThisMonth} variant="outline" className="font-bold">
+                                Reset to This Month
+                              </Button>
                             </div>
                           )}
                         </TableCell>

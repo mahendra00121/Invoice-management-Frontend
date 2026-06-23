@@ -50,6 +50,13 @@ import {
   DialogHeader, 
   DialogTitle 
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 
@@ -342,6 +349,7 @@ function numberToWords(num: number): string {
 export default function QuotationsPage() {
   const router = useRouter()
   const [mounted, setMounted] = useState(false)
+  const [userPermissions, setUserPermissions] = useState<string[]>([])
   
   // Data lists loaded from local storage
   const [customers, setCustomers] = useState<Customer[]>(() => {
@@ -424,20 +432,15 @@ export default function QuotationsPage() {
     loadData()
 
     if (typeof window !== "undefined") {
-      const user = localStorage.getItem("invoice_management_user")
-      if (!user) {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
         window.location.href = "/login"
         return
       }
-      if (!localStorage.getItem("invoice_management_customers")) {
-        
-      }
-      if (!localStorage.getItem("invoice_management_products")) {
-        
-      }
-      if (!localStorage.getItem("invoice_management_quotations")) {
-        
-      }
+      try {
+        const userObj = JSON.parse(userStr)
+        setUserPermissions(userObj.permissions ? userObj.permissions.split(',') : [])
+      } catch (e) {}
     }
     const handle = requestAnimationFrame(() => {
       setMounted(true)
@@ -836,7 +839,7 @@ export default function QuotationsPage() {
   }
 
   // Save Quotation Form (Submit Handler)
-  const handleSaveQuotation = (e: React.FormEvent) => {
+  const handleSaveQuotation = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!quoteCustomerId) {
@@ -854,8 +857,7 @@ export default function QuotationsPage() {
 
     const summaryTotals = calculateFormTotals(quoteItems, shippingCharges, quoteCustomerId)
 
-    const quotationObj: Quotation = {
-      id: quoteId,
+    const quotationObj = {
       quotationNumber: quoteNumber,
       customerId: customerObj.id,
       customerName: customerObj.companyName,
@@ -880,23 +882,25 @@ export default function QuotationsPage() {
       status: status,
       notes: notes,
       termsConditions: termsConditions,
-      createdBy: "Administrator",
-      createdAt: new Date().toISOString(),
       items: quoteItems,
       attachedFiles: attachedFiles
     }
 
-    let updatedList: Quotation[] = []
-    if (isEditingExisting) {
-      updatedList = quotations.map(item => item.id.toString() === quoteId.toString() ? quotationObj : item)
-      toast.success(`Quotation ${quoteNumber} updated successfully!`)
-    } else {
-      updatedList = [quotationObj, ...quotations]
-      toast.success(`New Tax Quotation ${quoteNumber} generated!`)
+    try {
+      if (isEditingExisting) {
+        await api.quotations.update(quoteId, quotationObj)
+        toast.success(`Quotation ${quoteNumber} updated successfully!`)
+      } else {
+        await api.quotations.create(quotationObj)
+        toast.success(`New Tax Quotation ${quoteNumber} generated!`)
+      }
+      
+      const quoRes = await api.quotations.getAll()
+      setQuotations(Array.isArray(quoRes) ? quoRes : [])
+      setIsCreateOpen(false)
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save quotation")
     }
-
-    saveQuotations(updatedList)
-    setIsCreateOpen(false)
   }
 
   // Convert Quotation to Invoice Action
@@ -1106,12 +1110,14 @@ export default function QuotationsPage() {
               )}
             </Button>
 
-            <Button 
-              onClick={handleOpenCreateForm}
-              className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
-            >
-              <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Draft Quotation</span>
-            </Button>
+            {userPermissions.includes("Quotations.CRUD") && (
+              <Button 
+                onClick={handleOpenCreateForm}
+                className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
+              >
+                <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Draft Quotation</span>
+              </Button>
+            )}
           </div>
         </header>
 
@@ -1242,10 +1248,21 @@ export default function QuotationsPage() {
                         filteredQuotations.map((q) => (
                           <TableRow 
                             key={q.id} 
-                            className="border-b border-border/60 hover:bg-muted/30 transition-colors h-16 group"
+                            className="border-b border-border/60 hover:bg-muted/30 transition-colors h-16 group relative"
                           >
                             <TableCell className="px-6 font-semibold text-foreground font-mono text-sm">
                               {q.quotationNumber}
+                              {(() => {
+                                const today = new Date();
+                                const exp = new Date(q.expiryDate);
+                                const diffDays = Math.ceil((exp.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                                const isExpiringSoon = diffDays >= 0 && diffDays <= 3 && (q.status === "Draft" || q.status === "Sent");
+                                return isExpiringSoon ? (
+                                  <span className="block mt-1 w-max px-2 py-0.5 rounded-md text-[9px] font-black tracking-widest uppercase bg-red-500/10 text-red-500 border border-red-500/20 animate-pulse">
+                                    ⏳ Expires in {diffDays} {diffDays === 1 ? 'Day' : 'Days'}
+                                  </span>
+                                ) : null;
+                              })()}
                             </TableCell>
                             
                             <TableCell className="px-6 font-semibold text-foreground">
@@ -1278,15 +1295,17 @@ export default function QuotationsPage() {
                             <TableCell className="px-6 text-right">
                               <div className="flex items-center justify-end gap-1.5">
                                 {/* Edit proposal Form */}
-                                <Button 
-                                  onClick={() => handleOpenEditForm(q)}
-                                  variant="ghost" 
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
-                                  title="Edit Quotation Data"
-                                >
-                                  <Edit2Icon className="w-4 h-4" />
-                                </Button>
+                                {userPermissions.includes("Quotations.CRUD") && (
+                                  <Button 
+                                    onClick={() => handleOpenEditForm(q)}
+                                    variant="ghost" 
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                    title="Edit Quotation Data"
+                                  >
+                                    <Edit2Icon className="w-4 h-4" />
+                                  </Button>
+                                )}
 
                                 {/* View invoice PDF template */}
                                 <Button 
@@ -1316,19 +1335,39 @@ export default function QuotationsPage() {
                                   <Mail className="w-4 h-4" />
                                 </Button>
 
+                                {/* WhatsApp Follow-up Reminder */}
+                                {(q.status === "Draft" || q.status === "Sent") && (
+                                  <Button 
+                                    onClick={() => {
+                                      let phone = q.customerPhone.replace(/[^0-9]/g, '');
+                                      if (phone.length === 10) phone = `91${phone}`;
+                                      const msg = `Namaste ${q.contactPerson || q.customerName},%0A%0AAapka Quotation (${q.quotationNumber}) ka reminder hai. Ye quotation *${q.expiryDate}* ko expire hone wala hai.%0AAgar aapka koi sawal ho ya deal final karni ho, toh kripya batayein.%0A%0AThank you!`;
+                                      window.open(`https://wa.me/${phone}?text=${msg}`, '_blank');
+                                    }}
+                                    variant="ghost" 
+                                    size="icon"
+                                    className="h-8 w-8 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10 rounded-lg transition-all animate-pulse"
+                                    title="Send WhatsApp Reminder"
+                                  >
+                                    <MessageCircle className="w-4 h-4" />
+                                  </Button>
+                                )}
+
                                 {/* Duplicate Quotation */}
-                                <Button 
-                                  onClick={() => handleDuplicateQuotation(q)}
-                                  variant="ghost" 
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
-                                  title="Duplicate Quotation"
-                                >
-                                  <Copy className="w-4 h-4" />
-                                </Button>
+                                {userPermissions.includes("Quotations.CRUD") && (
+                                  <Button 
+                                    onClick={() => handleDuplicateQuotation(q)}
+                                    variant="ghost" 
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-amber-500 hover:bg-amber-500/10 rounded-lg transition-all"
+                                    title="Duplicate Quotation"
+                                  >
+                                    <Copy className="w-4 h-4" />
+                                  </Button>
+                                )}
 
                                 {/* Approve Quotation */}
-                                {q.status !== "Approved" && q.status !== "Invoiced" && q.status !== "Expired" && (
+                                {q.status !== "Approved" && q.status !== "Invoiced" && q.status !== "Expired" && userPermissions.includes("Quotations.Approve") && (
                                   <Button 
                                     onClick={() => handleApproveQuotation(q)}
                                     variant="ghost" 
@@ -1341,7 +1380,7 @@ export default function QuotationsPage() {
                                 )}
 
                                 {/* Convert to Invoice trigger */}
-                                {q.status !== "Invoiced" && (
+                                {q.status !== "Invoiced" && userPermissions.includes("Quotations.Approve") && (
                                   <Button 
                                     onClick={() => handleConvertQuotationToInvoice(q)}
                                     variant="ghost" 
@@ -1354,33 +1393,39 @@ export default function QuotationsPage() {
                                 )}
 
                                 {/* Delete */}
-                                <Button 
-                                  onClick={() => {
-                                    setSelectedQuotation(q)
-                                    setIsDeleteOpen(true)
-                                  }}
-                                  variant="ghost" 
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                  title="Delete Estimate log"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                {userPermissions.includes("Quotations.CRUD") && (
+                                  <Button 
+                                    onClick={() => {
+                                      setSelectedQuotation(q)
+                                      setIsDeleteOpen(true)
+                                    }}
+                                    variant="ghost" 
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                    title="Delete Estimate log"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
                               </div>
                             </TableCell>
                           </TableRow>
                         ))
                       ) : (
                         <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={7} className="text-center py-16 text-muted-foreground px-6 border-b border-border">
-                            <div className="flex flex-col items-center justify-center space-y-3">
-                              <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground border border-border">
-                                <FileText className="w-6 h-6 text-muted-foreground" />
+                          <TableCell colSpan={7} className="h-[400px]">
+                            <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                                <FileText className="w-10 h-10 text-primary opacity-80" />
                               </div>
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">No proposals found</p>
-                                <p className="text-xs text-muted-foreground mt-1">Try tweaking your search keywords or compose a new estimate ledger above.</p>
-                              </div>
+                              <h3 className="text-xl font-black text-foreground mb-2">No Proposals Found</h3>
+                              <p className="text-sm text-muted-foreground mb-6">
+                                There are no quotations matching your filters. Try tweaking your search or draft a new estimate.
+                              </p>
+                              <Button onClick={handleOpenCreateForm} className="font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                                <Plus className="w-4 h-4 mr-2" />
+                                Draft Quotation
+                              </Button>
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1414,7 +1459,12 @@ export default function QuotationsPage() {
                     {filteredQuotations.filter(q => q.status === colStatus).map((q) => (
                       <Card 
                         key={q.id} 
-                        className="bg-card border-border shadow-sm hover:shadow-md transition-all cursor-move border-l-4 group"
+                        className={`bg-card border-border shadow-sm transition-all duration-300 cursor-move border-l-4 group hover:-translate-y-1 ${
+                          colStatus === 'Draft' ? 'hover:shadow-[0_8px_15px_-3px_rgba(100,116,139,0.2)]' :
+                          colStatus === 'Sent' ? 'hover:shadow-[0_8px_15px_-3px_rgba(59,130,246,0.2)]' :
+                          colStatus === 'Approved' ? 'hover:shadow-[0_8px_15px_-3px_rgba(16,185,129,0.2)]' :
+                          'hover:shadow-[0_8px_15px_-3px_rgba(239,68,68,0.2)]'
+                        }`}
                         style={{ borderLeftColor: colStatus === 'Draft' ? '#64748b' : colStatus === 'Sent' ? '#3b82f6' : colStatus === 'Approved' ? '#10b981' : '#ef4444' }}
                         draggable
                         onDragStart={(e) => handleDragStart(e, q.id)}
@@ -1452,8 +1502,9 @@ export default function QuotationsPage() {
                     ))}
                     
                     {filteredQuotations.filter(q => q.status === colStatus).length === 0 && (
-                      <div className="h-24 border-2 border-dashed border-border/60 rounded-xl flex items-center justify-center text-xs font-semibold text-muted-foreground/60">
-                        Drag items here
+                      <div className="h-32 mt-2 border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center text-muted-foreground bg-muted/20 opacity-70 hover:opacity-100 transition-opacity">
+                        <FileText className="w-6 h-6 mb-2 opacity-50" />
+                        <span className="text-xs font-semibold">Drop items here</span>
                       </div>
                     )}
                   </div>
@@ -1787,46 +1838,46 @@ export default function QuotationsPage() {
                   {/* Sales Person Dropdown */}
                   <div className="space-y-1.5">
                     <Label htmlFor="salesP" className="text-xs font-bold text-foreground/80">Sales Person</Label>
-                    <select
-                      id="salesP"
-                      value={salesPerson}
-                      onChange={(e) => setSalesPerson(e.target.value)}
-                      className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none"
-                    >
-                      {SALES_PERSONS.map(name => (
-                        <option key={name} value={name} className="bg-card text-foreground">{name}</option>
-                      ))}
-                    </select>
+                    <Select value={salesPerson} onValueChange={setSalesPerson}>
+                      <SelectTrigger id="salesP" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none">
+                        <SelectValue placeholder="Select Sales Person" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SALES_PERSONS.map(name => (
+                          <SelectItem key={name} value={name}>{name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Currency dropdown */}
                   <div className="space-y-1.5">
                     <Label htmlFor="currencyMode" className="text-xs font-bold text-foreground/80">Currency</Label>
-                    <select
-                      id="currencyMode"
-                      value={currency}
-                      onChange={(e) => setCurrency(e.target.value as "INR" | "USD")}
-                      className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-bold text-foreground outline-none"
-                    >
-                      <option value="INR" className="bg-card text-foreground">INR (₹)</option>
-                      <option value="USD" className="bg-card text-foreground">USD ($)</option>
-                    </select>
+                    <Select value={currency} onValueChange={(val: any) => setCurrency(val)}>
+                      <SelectTrigger id="currencyMode" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-bold text-foreground outline-none">
+                        <SelectValue placeholder="Select Currency" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="INR">INR (₹)</SelectItem>
+                        <SelectItem value="USD">USD ($)</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Status Dropdown */}
                   <div className="space-y-1.5">
                     <Label htmlFor="formStatus" className="text-xs font-bold text-foreground/80">Status</Label>
-                    <select
-                      id="formStatus"
-                      value={status}
-                      onChange={(e) => setStatus(e.target.value as "Draft" | "Sent" | "Approved" | "Rejected")}
-                      className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-bold text-foreground outline-none"
-                    >
-                      <option value="Draft" className="bg-card text-foreground">Draft</option>
-                      <option value="Sent" className="bg-card text-foreground">Sent</option>
-                      <option value="Approved" className="bg-card text-foreground">Approved</option>
-                      <option value="Rejected" className="bg-card text-foreground">Rejected</option>
-                    </select>
+                    <Select value={status} onValueChange={(val: any) => setStatus(val)}>
+                      <SelectTrigger id="formStatus" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-bold text-foreground outline-none">
+                        <SelectValue placeholder="Select Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Draft">Draft</SelectItem>
+                        <SelectItem value="Sent">Sent</SelectItem>
+                        <SelectItem value="Approved">Approved</SelectItem>
+                        <SelectItem value="Rejected">Rejected</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Billing address */}
@@ -1950,37 +2001,41 @@ export default function QuotationsPage() {
                             </td>
 
                             {/* GST Selection (Editable) */}
-                            <td className="py-3.5">
-                              <select
-                                value={item.gstPercent}
-                                onChange={(e) => handleRowItemChange(item.id, "gstPercent", parseInt(e.target.value) || 0)}
-                                className="mx-auto bg-background border border-border rounded-lg h-9 px-2 text-xs font-extrabold text-foreground outline-none text-center block w-20"
-                              >
-                                <option value={0}>0%</option>
-                                <option value={5}>5%</option>
-                                <option value={12}>12%</option>
-                                <option value={18}>18%</option>
-                                <option value={28}>28%</option>
-                              </select>
+                            <td className="py-3.5 px-2">
+                              <Select value={item.gstPercent.toString()} onValueChange={(val) => handleRowItemChange(item.id, "gstPercent", parseInt(val) || 0)}>
+                                <SelectTrigger className="mx-auto bg-background border border-border rounded-lg h-9 px-2 text-xs font-extrabold text-foreground outline-none text-center flex w-[72px]">
+                                  <SelectValue placeholder="0%" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="0">0%</SelectItem>
+                                  <SelectItem value="5">5%</SelectItem>
+                                  <SelectItem value="12">12%</SelectItem>
+                                  <SelectItem value="18">18%</SelectItem>
+                                  <SelectItem value="28">28%</SelectItem>
+                                </SelectContent>
+                              </Select>
                             </td>
 
                             {/* Discount Type & Value */}
                             <td className="py-3.5 px-2">
                               <div className="flex gap-1.5 items-center w-36 mx-auto">
-                                <select
-                                  value={item.discountType}
-                                  onChange={(e) => handleRowItemChange(item.id, "discountType", e.target.value)}
-                                  className="bg-background border border-border rounded-lg h-9 px-1 text-[10px] font-bold text-foreground outline-none"
-                                >
-                                  <option value="Percentage">%</option>
-                                  <option value="Flat">Val</option>
-                                </select>
+                                <div className="w-[64px]">
+                                  <Select value={item.discountType} onValueChange={(val) => handleRowItemChange(item.id, "discountType", val)}>
+                                    <SelectTrigger className="bg-background border border-border rounded-lg h-9 px-2 text-[10px] font-bold text-foreground outline-none flex w-full [&>span]:truncate">
+                                      <SelectValue placeholder="Type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="Percentage">%</SelectItem>
+                                      <SelectItem value="Flat">Val</SelectItem>
+                                    </SelectContent>
+                                  </Select>
+                                </div>
                                 <Input
                                   type="number"
                                   min={0}
                                   value={item.discountValue}
                                   onChange={(e) => handleRowItemChange(item.id, "discountValue", parseFloat(e.target.value) || 0)}
-                                  className="bg-background border-border rounded-xl h-9 text-xs font-bold font-mono text-right w-16"
+                                  className="bg-background border-border rounded-xl h-9 text-xs font-bold font-mono text-right flex-1 min-w-[50px] w-auto"
                                 />
                               </div>
                             </td>

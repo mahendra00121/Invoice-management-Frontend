@@ -127,17 +127,51 @@ const SEED_CUSTOMERS: Customer[] = [
     createdAt: "2026-05-22T10:15:00.000Z"
   }
 ];
+const getAvatarColor = (name: string) => {
+  const colors = [
+    "bg-blue-500/10 text-blue-500 border-blue-500/20",
+    "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+    "bg-amber-500/10 text-amber-500 border-amber-500/20",
+    "bg-purple-500/10 text-purple-500 border-purple-500/20",
+    "bg-rose-500/10 text-rose-500 border-rose-500/20",
+    "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+    "bg-cyan-500/10 text-cyan-500 border-cyan-500/20",
+  ];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
 
 export default function CustomersPage() {
   // Main states
   const [customers, setCustomers] = useState<Customer[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [mounted, setMounted] = useState(false)
-  
+  const [customerStats, setCustomerStats] = useState<Record<string, { totalBilled: number, pendingBalance: number }>>({})
+  const [userPermissions, setUserPermissions] = useState<string[]>([])
+
   const fetchCustomers = async () => {
     setIsLoading(true)
     try {
-      const data = await api.customers.getAll()
+      const [data, invoicesRes] = await Promise.all([
+        api.customers.getAll(),
+        api.invoices.getAll().catch(() => [])
+      ])
+      
+      const stats: Record<string, { totalBilled: number, pendingBalance: number }> = {}
+      
+      if (Array.isArray(invoicesRes)) {
+        invoicesRes.forEach((inv: any) => {
+          const cid = inv.customerId
+          if (!stats[cid]) stats[cid] = { totalBilled: 0, pendingBalance: 0 }
+          stats[cid].totalBilled += inv.grandTotal || 0
+          stats[cid].pendingBalance += inv.balanceAmount ?? (inv.grandTotal - (inv.paidAmount || 0))
+        })
+      }
+      
+      setCustomerStats(stats)
       setCustomers(data)
     } catch (e) {
       console.error(e)
@@ -149,11 +183,15 @@ export default function CustomersPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const user = localStorage.getItem("invoice_management_user")
-      if (!user) {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
         window.location.href = "/login"
         return
       }
+      try {
+        const userObj = JSON.parse(userStr)
+        setUserPermissions(userObj.permissions ? userObj.permissions.split(',') : [])
+      } catch (e) {}
     }
     const handle = requestAnimationFrame(() => {
       setMounted(true)
@@ -212,6 +250,13 @@ export default function CustomersPage() {
     }
     localStorage.setItem("invoice_management_theme", theme)
   }, [theme])
+
+  // Listen for bot actions
+  useEffect(() => {
+    const handleCreateCustomer = () => setIsAddOpen(true);
+    window.addEventListener('BOT_ACTION_CREATE_CUSTOMER', handleCreateCustomer);
+    return () => window.removeEventListener('BOT_ACTION_CREATE_CUSTOMER', handleCreateCustomer);
+  }, []);
 
   // Sync to LocalStorage (Removed as we use real DB)
   // Handle Form Change
@@ -422,38 +467,32 @@ export default function CustomersPage() {
 
   // Generate a dynamic health badge for the customer
   const getCustomerHealthBadge = (customer: Customer) => {
-    // We use a deterministic approach based on string length and ID for realistic demo purposes
-    const idNum = typeof customer.id === 'string' ? parseInt(customer.id) : customer.id;
     const isNew = new Date(customer.createdAt).getTime() > Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const stats = customerStats[customer.id] || { totalBilled: 0, pendingBalance: 0 };
     
-    if (isNew) {
+    if (stats.pendingBalance > 0) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500 border border-blue-500/20 mt-1">
-          <ShieldCheck className="w-2.5 h-2.5" /> New Client
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-red-500/10 text-red-500 border border-red-500/30 mt-1 shadow-[0_0_12px_rgba(239,68,68,0.3)] animate-pulse">
+          <AlertCircle className="w-2.5 h-2.5 text-red-500" /> Pending (₹{stats.pendingBalance.toLocaleString("en-IN")})
         </span>
       );
-    }
-    
-    // Pseudo logic for VIP vs Defaulter vs Regular
-    const hash = (idNum || 0) + customer.companyName.length;
-    
-    if (hash % 5 === 0) {
+    } else if (stats.totalBilled >= 100000) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-red-500/10 text-red-500 border border-red-500/20 mt-1">
-          <AlertCircle className="w-2.5 h-2.5" /> Payment Pending
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-gradient-to-r from-amber-500/20 to-yellow-500/10 text-amber-600 border border-amber-500/40 mt-1 shadow-[0_0_8px_rgba(245,158,11,0.2)]">
+          <Star className="w-2.5 h-2.5 text-amber-500 fill-amber-500" /> VIP Client
         </span>
       );
-    } else if (hash % 3 === 0) {
+    } else if (isNew) {
       return (
-        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-500 border border-amber-500/20 mt-1">
-          <Star className="w-2.5 h-2.5" /> VIP Client
+        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-500 border border-blue-500/30 mt-1 shadow-sm">
+          <ShieldCheck className="w-2.5 h-2.5 text-blue-500" /> New Client
         </span>
       );
     }
     
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 mt-1">
-        <ShieldCheck className="w-2.5 h-2.5" /> Regular
+      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 mt-1">
+        <ShieldCheck className="w-2.5 h-2.5 text-emerald-500" /> Regular
       </span>
     );
   }
@@ -537,13 +576,14 @@ export default function CustomersPage() {
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
               Live Ledger Active
             </div>
-            
-            <Button 
-              onClick={handleOpenAdd}
-              className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
-            >
-              <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Add Customer</span>
-            </Button>
+            {userPermissions.includes("Customers.CRUD") && (
+              <Button 
+                onClick={handleOpenAdd}
+                className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
+              >
+                <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Add Customer</span>
+              </Button>
+            )}
           </div>
         </header>
 
@@ -620,7 +660,9 @@ export default function CustomersPage() {
                         <TableHead className="text-foreground font-semibold px-6">Phone / Email</TableHead>
                         <TableHead className="text-foreground font-semibold px-6">GSTIN</TableHead>
                         <TableHead className="text-foreground font-semibold px-6">Location</TableHead>
-                        <TableHead className="text-foreground font-semibold text-right px-6">Actions</TableHead>
+                        {userPermissions.includes("Customers.CRUD") && (
+                          <TableHead className="text-foreground font-semibold text-right px-6">Actions</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -633,7 +675,7 @@ export default function CustomersPage() {
                             {/* Company details */}
                             <TableCell className="px-6 font-semibold text-foreground">
                               <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 text-primary font-bold text-xs uppercase shrink-0">
+                                <div className={`w-9 h-9 rounded-lg flex items-center justify-center border font-black text-xs uppercase shrink-0 ${getAvatarColor(customer.companyName)}`}>
                                   {customer.companyName.charAt(0)}
                                 </div>
                                 <div className="truncate max-w-[200px]">
@@ -702,49 +744,49 @@ export default function CustomersPage() {
                                   <History className="w-4 h-4" />
                                 </Button>
 
-                                {/* Edit button */}
-                                <Button 
-                                  onClick={() => handleOpenEdit(customer)}
-                                  variant="ghost" 
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
-                                  title="Edit Details"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </Button>
+                                {userPermissions.includes("Customers.CRUD") && (
+                                  <>
+                                    {/* Edit button */}
+                                    <Button 
+                                      onClick={() => handleOpenEdit(customer)}
+                                      variant="ghost" 
+                                      size="icon"
+                                      className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                      title="Edit Details"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </Button>
 
-                                {/* Delete button */}
-                                <Button 
-                                  onClick={() => handleOpenDelete(customer)}
-                                  variant="ghost" 
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                  title="Delete Customer"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-
+                                    {/* Delete button */}
+                                    <Button 
+                                      onClick={() => handleOpenDelete(customer)}
+                                      variant="ghost" 
+                                      size="icon"
+                                      className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                      title="Delete Customer"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </>
+                                )}
                               </div>
                             </TableCell>
                           </TableRow>
                         ))
                       ) : (
                         <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={6} className="text-center py-16 text-muted-foreground px-6 border-b border-border">
-                            <div className="flex flex-col items-center justify-center space-y-3">
-                              <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground border border-border">
-                                <Users className="w-6 h-6 text-muted-foreground" />
+                          <TableCell colSpan={6} className="h-[400px]">
+                            <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                                <Users className="w-10 h-10 text-primary opacity-80" />
                               </div>
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">No Customers Found</p>
-                                <p className="text-xs text-muted-foreground mt-1">Try resetting your search query or add a brand new customer above.</p>
-                              </div>
-                              <Button 
-                                onClick={handleOpenAdd} 
-                                variant="outline" 
-                                className="mt-2 border-border hover:bg-accent text-foreground rounded-lg text-xs"
-                              >
-                                Add First Customer
+                              <h3 className="text-xl font-black text-foreground mb-2">No Customers Found</h3>
+                              <p className="text-sm text-muted-foreground mb-6">
+                                We couldn't find any customers matching your criteria. Try adjusting your search or add a new client to your directory.
+                              </p>
+                              <Button onClick={handleOpenAdd} className="font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add New Customer
                               </Button>
                             </div>
                           </TableCell>
@@ -765,7 +807,7 @@ export default function CustomersPage() {
                     
                     <CardContent className="p-5 flex-1 flex flex-col">
                       <div className="flex justify-between items-start mb-4">
-                        <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 text-primary font-bold text-lg uppercase shadow-sm">
+                        <div className={`w-12 h-12 rounded-xl flex items-center justify-center border font-black text-lg uppercase shadow-sm ${getAvatarColor(customer.companyName)}`}>
                           {customer.companyName.charAt(0)}
                         </div>
                         <div className="flex flex-col items-end">
@@ -811,36 +853,44 @@ export default function CustomersPage() {
                         >
                           <History className="w-3 h-3 mr-1.5" /> Ledger
                         </Button>
-                        <Button 
-                          onClick={() => handleOpenEdit(customer)}
-                          variant="outline" 
-                          className="h-8 w-8 p-0 bg-background border-border text-muted-foreground hover:text-emerald-500 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all shrink-0"
-                          title="Edit"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </Button>
-                        <Button 
-                          onClick={() => handleOpenDelete(customer)}
-                          variant="outline" 
-                          className="h-8 w-8 p-0 bg-background border-border text-muted-foreground hover:text-red-500 hover:border-red-500/50 hover:bg-red-500/5 transition-all shrink-0"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                        {userPermissions.includes("Customers.CRUD") && (
+                          <>
+                            <Button 
+                              onClick={() => handleOpenEdit(customer)}
+                              variant="outline" 
+                              className="h-8 w-8 p-0 bg-background border-border text-muted-foreground hover:text-emerald-500 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all shrink-0"
+                              title="Edit"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </Button>
+                            <Button 
+                              onClick={() => handleOpenDelete(customer)}
+                              variant="outline" 
+                              className="h-8 w-8 p-0 bg-background border-border text-muted-foreground hover:text-red-500 hover:border-red-500/50 hover:bg-red-500/5 transition-all shrink-0"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
                 ))
               ) : (
-                <div className="col-span-full py-16 text-center border-2 border-dashed border-border rounded-2xl bg-card/50">
-                  <div className="flex flex-col items-center justify-center space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground border border-border">
-                      <Users className="w-6 h-6 text-muted-foreground" />
+                <div className="col-span-full h-[400px]">
+                  <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                      <Users className="w-10 h-10 text-primary opacity-80" />
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">No Customers Found</p>
-                      <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">Adjust your search query or add a new customer to populate the grid.</p>
-                    </div>
+                    <h3 className="text-xl font-black text-foreground mb-2">No Customers Found</h3>
+                    <p className="text-sm text-muted-foreground mb-6">
+                      We couldn't find any customers matching your criteria. Try adjusting your search or add a new client to your directory.
+                    </p>
+                    <Button onClick={handleOpenAdd} className="font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Customer
+                    </Button>
                   </div>
                 </div>
               )}

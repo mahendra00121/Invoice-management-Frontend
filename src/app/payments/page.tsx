@@ -42,6 +42,13 @@ import {
   DialogHeader, 
   DialogTitle 
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from "sonner"
 
 
@@ -159,6 +166,7 @@ const SEED_PAYMENTS: PaymentEntry[] = [
 
 export default function PaymentsPage() {
   const [mounted, setMounted] = useState(false)
+  const [userPermissions, setUserPermissions] = useState<string[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [payments, setPayments] = useState<PaymentEntry[]>([])
   
@@ -208,11 +216,16 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const user = localStorage.getItem("invoice_management_user")
-      if (!user) {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
         window.location.href = "/login"
         return
       }
+      try {
+        const userObj = JSON.parse(userStr)
+        setUserPermissions(userObj.permissions ? userObj.permissions.split(',') : [])
+      } catch (e) {}
+
       // Invoices database loader
       const savedInvoices = localStorage.getItem("invoice_management_invoices")
       if (savedInvoices) {
@@ -251,6 +264,21 @@ export default function PaymentsPage() {
     })
     return () => cancelAnimationFrame(handle)
   }, [])
+
+  const getPaymentModeBadge = (mode: string) => {
+    switch(mode) {
+      case "UPI":
+        return "bg-purple-500/10 text-purple-600 border-purple-500/20";
+      case "Bank Transfer":
+        return "bg-blue-500/10 text-blue-600 border-blue-500/20";
+      case "Cash":
+        return "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
+      case "Cheque":
+        return "bg-amber-500/10 text-amber-600 border-amber-500/20";
+      default:
+        return "bg-muted text-muted-foreground border-border";
+    }
+  }
 
   // Calculate statistics summary
   const totalAmountReceived = payments.reduce((acc, p) => acc + p.amount, 0)
@@ -565,13 +593,15 @@ export default function PaymentsPage() {
               {theme === "light" ? <Moon className="w-4 h-4" /> : <Sun className="w-4 h-4" />}
             </Button>
 
-            <Button 
-              onClick={handleOpenAddForm}
-              className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-3 md:px-4 rounded-xl text-xs h-10 shadow-lg flex items-center gap-2 group transition-all"
-            >
-              <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
-              <span className="hidden md:inline">Record Payment Entry</span>
-            </Button>
+            {userPermissions.includes("Payments.CRUD") && (
+              <Button 
+                onClick={handleOpenAddForm}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground font-semibold px-3 md:px-4 rounded-xl text-xs h-10 shadow-lg flex items-center gap-2 group transition-all"
+              >
+                <Plus className="w-4 h-4 transition-transform group-hover:rotate-90" />
+                <span className="hidden md:inline">Record Payment Entry</span>
+              </Button>
+            )}
           </div>
         </header>
 
@@ -791,8 +821,12 @@ export default function PaymentsPage() {
 
                             {/* Payment Mode */}
                             <TableCell className="px-6 text-foreground font-semibold">
-                              <div className="flex flex-col">
-                                <span className="text-xs">{p.paymentMode}</span>
+                              <div className="flex flex-col items-start gap-1">
+                                <div>
+                                  <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${getPaymentModeBadge(p.paymentMode)}`}>
+                                    {p.paymentMode}
+                                  </span>
+                                </div>
                                 {safeRef && (
                                   <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[120px]">Ref: {safeRef}</span>
                                 )}
@@ -805,10 +839,17 @@ export default function PaymentsPage() {
                             </TableCell>
 
                             {/* Remaining Balance */}
-                            <TableCell className="px-6 text-muted-foreground font-semibold font-mono text-right text-xs">
-                              <span className={safeBalance === 0 ? "text-emerald-500/80 font-bold" : "text-amber-500/90 font-bold"}>
-                                {safeBalance === 0 ? "Fully Paid" : `₹${safeBalance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}`}
-                              </span>
+                            <TableCell className="px-6 text-right">
+                              {safeBalance <= 0 ? (
+                                <span className="inline-flex items-center gap-1 bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest shadow-[0_2px_10px_rgba(16,185,129,0.05)]">
+                                  <CheckCircle className="w-3 h-3" />
+                                  Fully Settled
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center bg-amber-500/10 text-amber-600 border border-amber-500/20 px-2.5 py-0.5 rounded-full text-[11px] font-black font-mono shadow-[0_2px_10px_rgba(245,158,11,0.05)]">
+                                  ₹{safeBalance.toLocaleString("en-IN", { minimumFractionDigits: 2 })}
+                                </span>
+                              )}
                             </TableCell>
 
                             {/* Action Buttons */}
@@ -840,15 +881,17 @@ export default function PaymentsPage() {
                                 </Button>
 
                                 {/* Delete collection record */}
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="w-8 h-8 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-all"
-                                  onClick={() => handleDeletePayment(p)}
-                                  title="Void Transaction Record"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
+                                {userPermissions.includes("Payments.CRUD") && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="w-8 h-8 rounded-lg text-muted-foreground hover:text-red-500 hover:bg-red-500/10 transition-all"
+                                    onClick={() => handleDeletePayment(p)}
+                                    title="Void Transaction Record"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                )}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -856,21 +899,18 @@ export default function PaymentsPage() {
                       })
                     ) : (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={8} className="text-center py-20 text-muted-foreground px-6 border-b border-border">
-                          <div className="flex flex-col items-center justify-center space-y-3">
-                            <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground border border-border">
-                              <Coins className="w-6 h-6 text-muted-foreground animate-pulse" />
+                        <TableCell colSpan={8} className="h-[400px]">
+                          <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                            <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                              <Coins className="w-10 h-10 text-primary opacity-80" />
                             </div>
-                            <div>
-                              <p className="text-sm font-semibold text-foreground">No Payments Registered</p>
-                              <p className="text-xs text-muted-foreground mt-1">Try resetting filter controls or post a collections entry from standard invoices.</p>
-                            </div>
-                            <Button 
-                              onClick={handleOpenAddForm} 
-                              variant="outline" 
-                              className="mt-2 border-border hover:bg-accent text-foreground rounded-lg text-xs"
-                            >
-                              Add First Receipt
+                            <h3 className="text-xl font-black text-foreground mb-2">No Payments Found</h3>
+                            <p className="text-sm text-muted-foreground mb-6">
+                              There are no payment receipts matching your current filters. Try resetting them or record a new collection.
+                            </p>
+                            <Button onClick={handleOpenAddForm} className="font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                              <Plus className="w-4 h-4 mr-2" />
+                              Record Payment Entry
                             </Button>
                           </div>
                         </TableCell>
@@ -915,28 +955,32 @@ export default function PaymentsPage() {
               {/* Invoice Selector */}
               <div className="space-y-1.5 col-span-2">
                 <Label htmlFor="invoiceSelect" className="text-xs font-bold text-foreground/80">Select Pending Invoice Ledger *</Label>
-                <select
-                  id="invoiceSelect"
-                  value={selectedInvoiceId}
-                  onChange={(e) => {
-                    setSelectedInvoiceId(e.target.value)
-                    const inv = invoices.find(i => i.id == e.target.value)
+                <Select
+                  value={selectedInvoiceId || "none"}
+                  onValueChange={(val) => {
+                    const finalVal = val === "none" ? "" : val
+                    setSelectedInvoiceId(finalVal)
+                    const inv = invoices.find(i => i.id == finalVal)
                     if (inv) {
                       setPaymentAmount(inv.balanceAmount.toString())
                       setFormErrors(prev => ({ ...prev, selectedInvoiceId: "", paymentAmount: "" }))
                     }
                   }}
-                  className={`px-3 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none transition-all ${formErrors.selectedInvoiceId ? "border-red-500 focus:border-red-500" : ""}`}
                 >
-                  <option value="" className="text-muted-foreground">-- Choose Outstanding Invoice --</option>
-                  {invoices
-                    .filter(inv => inv.status !== "Draft" && inv.status !== "Cancelled" && inv.status !== "Paid" && inv.balanceAmount > 0)
-                    .map(inv => (
-                      <option key={inv.id} value={inv.id} className="bg-card text-foreground">
-                        {inv.invoiceNumber} - {inv.customerName} (Bal Due: ₹{inv.balanceAmount.toLocaleString("en-IN")} / Total: ₹{inv.grandTotal.toLocaleString("en-IN")})
-                      </option>
-                    ))}
-                </select>
+                  <SelectTrigger id="invoiceSelect" className={`px-3 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none transition-all ${formErrors.selectedInvoiceId ? "border-red-500 focus:border-red-500" : ""}`}>
+                    <SelectValue placeholder="-- Choose Outstanding Invoice --" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">-- Choose Outstanding Invoice --</SelectItem>
+                    {invoices
+                      .filter(inv => inv.status !== "Draft" && inv.status !== "Cancelled" && inv.status !== "Paid" && inv.balanceAmount > 0)
+                      .map(inv => (
+                        <SelectItem key={inv.id} value={inv.id.toString()}>
+                          {inv.invoiceNumber} - {inv.customerName} (Bal Due: ₹{inv.balanceAmount.toLocaleString("en-IN")} / Total: ₹{inv.grandTotal.toLocaleString("en-IN")})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
                 {formErrors.selectedInvoiceId && <span className="text-[10px] text-red-500 font-semibold block mt-0.5">{formErrors.selectedInvoiceId}</span>}
               </div>
 
@@ -1026,35 +1070,38 @@ export default function PaymentsPage() {
               {/* Payment Mode Selector */}
               <div className="space-y-1.5 col-span-2 sm:col-span-1">
                 <Label htmlFor="payModeSelect" className="text-xs font-bold text-foreground/80">Payment Mode *</Label>
-                <select
-                  id="payModeSelect"
+                <Select
                   value={paymentMode}
-                  onChange={(e) => {
-                    setPaymentMode(e.target.value as "Cash" | "UPI" | "Bank Transfer" | "Cheque")
+                  onValueChange={(val: any) => {
+                    setPaymentMode(val)
                     setFormErrors(prev => ({ ...prev, transactionId: "", refNumber: "", chequeNumber: "" }))
                   }}
-                  className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none"
                 >
-                  <option value="UPI" className="bg-card text-foreground">UPI (BHIM/GPay/PhonePe)</option>
-                  <option value="Bank Transfer" className="bg-card text-foreground">Bank Transfer (NEFT/IMPS/RTGS)</option>
-                  <option value="Cash" className="bg-card text-foreground">Cash Collection</option>
-                  <option value="Cheque" className="bg-card text-foreground">Bank Cheque</option>
-                </select>
+                  <SelectTrigger id="payModeSelect" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none">
+                    <SelectValue placeholder="Select Payment Mode" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="UPI">UPI (BHIM/GPay/PhonePe)</SelectItem>
+                    <SelectItem value="Bank Transfer">Bank Transfer (NEFT/IMPS/RTGS)</SelectItem>
+                    <SelectItem value="Cash">Cash Collection</SelectItem>
+                    <SelectItem value="Cheque">Bank Cheque</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Received By */}
               <div className="space-y-1.5 col-span-2 sm:col-span-1">
                 <Label htmlFor="receivedBySelect" className="text-xs font-bold text-foreground/80">Received By Staff *</Label>
-                <select
-                  id="receivedBySelect"
-                  value={receivedBy}
-                  onChange={(e) => setReceivedBy(e.target.value)}
-                  className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none"
-                >
-                  {RECEIVED_BY_LIST.map(staff => (
-                    <option key={staff} value={staff} className="bg-card text-foreground">{staff}</option>
-                  ))}
-                </select>
+                <Select value={receivedBy} onValueChange={setReceivedBy}>
+                  <SelectTrigger id="receivedBySelect" className="px-3 bg-background border border-border focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-xs font-semibold text-foreground outline-none">
+                    <SelectValue placeholder="Select Staff" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {RECEIVED_BY_LIST.map(staff => (
+                      <SelectItem key={staff} value={staff}>{staff}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* DYNAMIC METADATA INPUTS depending on Mode Selected */}

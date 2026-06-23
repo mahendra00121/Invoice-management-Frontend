@@ -14,12 +14,15 @@ import {
   ArrowRight,
   RefreshCcw,
   Sparkles,
-  AlertTriangle
+  AlertTriangle,
+  Sun,
+  Moon
 } from "lucide-react"
 
 import Sidebar from "@/components/Sidebar"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { motion } from "framer-motion"
 
 export default function DashboardPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -85,7 +88,13 @@ export default function DashboardPage() {
 
         // Set Recent Invoices
         const sorted = invoices.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-        setRecentInvoices(sorted.slice(0, 5))
+        const invoicesWithStatus = sorted.map((inv: any) => {
+          const invTotal = inv.items?.reduce((itemSum: number, item: any) => itemSum + ((item.quantity * item.unitPrice) || 0), 0) || 0
+          const withTax = invTotal * 1.18 
+          const paidAmt = payments.filter((p: any) => p.invoiceId === inv.id).reduce((sum: number, p: any) => sum + Number(p.amount), 0)
+          return { ...inv, displayStatus: paidAmt >= (withTax - 1) ? "Paid" : "Pending" }
+        })
+        setRecentInvoices(invoicesWithStatus.slice(0, 5))
 
         // Set Low Stock Products (<= 10)
         const lowStock = products.filter((p: any) => p.stockQuantity <= 10).sort((a: any, b: any) => a.stockQuantity - b.stockQuantity)
@@ -138,6 +147,15 @@ export default function DashboardPage() {
     }).format(amount)
   }
 
+  const getGreeting = () => {
+    const hour = new Date().getHours()
+    if (hour < 12) return { text: "Good Morning", icon: <Sun className="w-5 h-5 text-amber-500" /> }
+    if (hour < 17) return { text: "Good Afternoon", icon: <Sun className="w-5 h-5 text-amber-500" /> }
+    return { text: "Good Evening", icon: <Moon className="w-5 h-5 text-indigo-400" /> }
+  }
+
+  const greeting = getGreeting()
+
   return (
     <div className="flex h-screen bg-background text-foreground font-sans selection:bg-primary/20 overflow-hidden">
       <Sidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} />
@@ -150,10 +168,10 @@ export default function DashboardPage() {
             </Button>
             <div>
               <h1 className="text-xl font-extrabold tracking-tight text-foreground flex items-center gap-2">
-                Dashboard Overview
+                {greeting.text}, Admin {greeting.icon}
               </h1>
               <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider hidden sm:block">
-                Financial summary and key metrics
+                Here's your Dashboard Overview
               </p>
             </div>
           </div>
@@ -170,7 +188,12 @@ export default function DashboardPage() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <div className="max-w-7xl mx-auto space-y-6 animate-fadeIn">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.5 }}
+            className="max-w-7xl mx-auto space-y-6"
+          >
             
             {/* Top Stat Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -270,6 +293,14 @@ export default function DashboardPage() {
                   ) : (
                     <div className="w-full h-56 relative flex items-end">
                       <svg className="w-full h-full text-primary" viewBox="0 0 500 80" preserveAspectRatio="none">
+                        <style>{`
+                          @keyframes drawLine {
+                            to { stroke-dashoffset: 0; }
+                          }
+                          @keyframes fadeArea {
+                            to { opacity: 1; }
+                          }
+                        `}</style>
                         <defs>
                           <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.3"/>
@@ -277,9 +308,22 @@ export default function DashboardPage() {
                           </linearGradient>
                         </defs>
                         {/* Shaded Area Underneath */}
-                        <polygon points={chartData.points} fill="url(#chartGrad)" />
+                        <polygon 
+                          points={chartData.points} 
+                          fill="url(#chartGrad)" 
+                          style={{ opacity: 0, animation: "fadeArea 1.5s ease-out 0.8s forwards" }} 
+                        />
                         {/* Bold Accent Line */}
-                        <path d={chartData.path} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                        <path 
+                          d={chartData.path} 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2.5" 
+                          strokeLinecap="round" 
+                          strokeDasharray="1000" 
+                          strokeDashoffset="1000"
+                          style={{ animation: "drawLine 2s ease-out forwards" }}
+                        />
                       </svg>
                       {/* Grid Lines Overlay */}
                       <div className="absolute inset-0 flex flex-col justify-between pointer-events-none opacity-10">
@@ -317,8 +361,15 @@ export default function DashboardPage() {
                     </div>
                   ) : recentInvoices.length > 0 ? (
                     <div className="divide-y divide-border/60">
-                      {recentInvoices.map((inv) => (
-                        <div key={inv.id} className="p-4 flex items-center justify-between hover:bg-muted/15 transition-all cursor-pointer" onClick={() => window.location.href = '/invoices'}>
+                      {recentInvoices.map((inv, index) => (
+                        <motion.div 
+                          key={inv.id} 
+                          initial={{ opacity: 0, x: -20 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: index * 0.1 }}
+                          className="p-4 flex items-center justify-between hover:bg-muted/15 transition-all cursor-pointer" 
+                          onClick={() => window.location.href = '/invoices'}
+                        >
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-xl bg-primary/15 flex items-center justify-center text-primary font-black text-[10px]">
                               INV
@@ -332,9 +383,17 @@ export default function DashboardPage() {
                             <p className="text-xs font-extrabold text-foreground">
                               {new Date(inv.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
                             </p>
-                            <p className="text-[10px] font-black text-primary mt-0.5">Details</p>
+                            {inv.displayStatus === "Paid" ? (
+                              <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse"></span> Paid
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded text-[8px] font-black uppercase tracking-widest bg-red-500/10 text-red-500 border border-red-500/20">
+                                <span className="w-1 h-1 rounded-full bg-red-500 animate-pulse"></span> Pending
+                              </span>
+                            )}
                           </div>
-                        </div>
+                        </motion.div>
                       ))}
                     </div>
                   ) : (
@@ -421,7 +480,7 @@ export default function DashboardPage() {
               </Card>
             )}
 
-          </div>
+          </motion.div>
         </div>
       </main>
     </div>

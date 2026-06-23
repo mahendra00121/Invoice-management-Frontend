@@ -17,7 +17,13 @@ import {
   Hash,
   Scale,
   LayoutGrid,
-  List
+  List,
+  Monitor,
+  Paperclip,
+  Briefcase,
+  Wrench,
+  Box,
+  ShoppingBag
 } from "lucide-react"
 
 import Sidebar from "@/components/Sidebar"
@@ -36,7 +42,15 @@ import {
   DialogHeader, 
   DialogTitle 
 } from "@/components/ui/dialog"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 import { toast } from "sonner"
+import { api } from "@/lib/api"
 
 // Interfaces
 interface Product {
@@ -124,38 +138,61 @@ const GST_PERCENTAGES = [0, 5, 12, 18, 28];
 // Available Measurement Units
 const MEASUREMENT_UNITS = ["Pcs", "Kgs", "Ltr", "Mtr", "Box", "Hrs", "Bag", "Set"];
 
+const getCategoryStyling = (cat: string) => {
+  switch (cat) {
+    case "Electronics": return { bg: "bg-blue-500/10 border-blue-500/20 text-blue-500", icon: Monitor };
+    case "Raw Materials": return { bg: "bg-amber-500/10 border-amber-500/20 text-amber-500", icon: Layers };
+    case "Office Supplies": return { bg: "bg-purple-500/10 border-purple-500/20 text-purple-500", icon: Paperclip };
+    case "Services": return { bg: "bg-indigo-500/10 border-indigo-500/20 text-indigo-500", icon: Briefcase };
+    case "Machinery": return { bg: "bg-rose-500/10 border-rose-500/20 text-rose-500", icon: Wrench };
+    case "Packaging": return { bg: "bg-emerald-500/10 border-emerald-500/20 text-emerald-500", icon: Box };
+    default: return { bg: "bg-primary/10 border-primary/20 text-primary", icon: Package };
+  }
+}
+
 export default function ProductsPage() {
   // Main states
-  const [products, setProducts] = useState<Product[]>(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("invoice_management_products")
-      if (stored) {
-        try {
-          return JSON.parse(stored)
-        } catch (error) {
-          console.error(error)
-          return SEED_PRODUCTS
-        }
-      }
-    }
-    return SEED_PRODUCTS
-  })
-  
+  const [products, setProducts] = useState<Product[]>([])
+  const [isLoading, setIsLoading] = useState(false)
   const [mounted, setMounted] = useState(false)
-  
+  const [userPermissions, setUserPermissions] = useState<string[]>([])
+
+  const fetchProducts = async () => {
+    setIsLoading(true)
+    try {
+      const data = await api.products.getAll()
+      setProducts(data)
+    } catch (e) {
+      console.error(e)
+      toast.error("Failed to fetch products")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const user = localStorage.getItem("invoice_management_user")
-      if (!user) {
+      const userStr = localStorage.getItem("invoice_management_user")
+      if (!userStr) {
         window.location.href = "/login"
         return
       }
+      try {
+        const userObj = JSON.parse(userStr)
+        setUserPermissions(userObj.permissions ? userObj.permissions.split(',') : [])
+      } catch (e) {}
     }
     const handle = requestAnimationFrame(() => {
       setMounted(true)
     })
     return () => cancelAnimationFrame(handle)
   }, [])
+
+  useEffect(() => {
+    if (mounted) {
+      fetchProducts()
+    }
+  }, [mounted])
   
   const [searchQuery, setSearchQuery] = useState("")
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -202,11 +239,12 @@ export default function ProductsPage() {
     localStorage.setItem("invoice_management_theme", theme)
   }, [theme])
 
-  // Sync to LocalStorage
-  const saveProducts = (newProducts: Product[]) => {
-    setProducts(newProducts)
-    localStorage.setItem("invoice_management_products", JSON.stringify(newProducts))
-  }
+  // Listen for bot actions
+  useEffect(() => {
+    const handleCreateProduct = () => setIsAddOpen(true);
+    window.addEventListener('BOT_ACTION_CREATE_PRODUCT', handleCreateProduct);
+    return () => window.removeEventListener('BOT_ACTION_CREATE_PRODUCT', handleCreateProduct);
+  }, []);
 
   // Handle Form Input Change
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
@@ -277,15 +315,14 @@ export default function ProductsPage() {
   }
 
   // Submit Add Product
-  const handleAddSubmit = (e: React.FormEvent) => {
+  const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!validateForm()) {
       toast.error("Please correct the validation errors in the form.")
       return
     }
 
-    const newProduct: Product = {
-      id: Math.floor(Math.random() * 10000000),
+    const payload = {
       productName: formData.productName.trim(),
       categoryName: formData.categoryName,
       hsnCode: formData.hsnCode.trim(),
@@ -294,14 +331,17 @@ export default function ProductsPage() {
       gstPercent: parseInt(formData.gstPercent),
       stockQuantity: parseInt(formData.stockQuantity),
       unit: formData.unit,
-      description: formData.description.trim(),
-      createdAt: new Date().toISOString()
+      description: formData.description.trim()
     }
 
-    const updated = [newProduct, ...products]
-    saveProducts(updated)
-    setIsAddOpen(false)
-    toast.success(`${newProduct.productName} added successfully!`)
+    try {
+      await api.products.create(payload)
+      setIsAddOpen(false)
+      toast.success(`${payload.productName} added successfully!`)
+      fetchProducts()
+    } catch (e: any) {
+      toast.error(e.message || "Failed to add product")
+    }
   }
 
   // Open Edit Dialog
@@ -323,7 +363,7 @@ export default function ProductsPage() {
   }
 
   // Submit Edit Product
-  const handleEditSubmit = (e: React.FormEvent) => {
+  const handleEditSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!selectedProduct) return
 
@@ -332,27 +372,26 @@ export default function ProductsPage() {
       return
     }
 
-    const updatedProducts = products.map(p => {
-      if (p.id == selectedProduct.id) {
-        return {
-          ...p,
-          productName: formData.productName.trim(),
-          categoryName: formData.categoryName,
-          hsnCode: formData.hsnCode.trim(),
-          barcode: formData.barcode?.trim() || "",
-          unitPrice: parseFloat(formData.unitPrice),
-          gstPercent: parseInt(formData.gstPercent),
-          stockQuantity: parseInt(formData.stockQuantity),
-          unit: formData.unit,
-          description: formData.description.trim()
-        }
-      }
-      return p
-    })
+    const payload = {
+      productName: formData.productName.trim(),
+      categoryName: formData.categoryName,
+      hsnCode: formData.hsnCode.trim(),
+      barcode: formData.barcode?.trim() || "",
+      unitPrice: parseFloat(formData.unitPrice),
+      gstPercent: parseInt(formData.gstPercent),
+      stockQuantity: parseInt(formData.stockQuantity),
+      unit: formData.unit,
+      description: formData.description.trim()
+    }
 
-    saveProducts(updatedProducts)
-    setIsEditOpen(false)
-    toast.success(`${formData.productName} updated successfully!`)
+    try {
+      await api.products.update(selectedProduct.id, payload)
+      setIsEditOpen(false)
+      toast.success(`${payload.productName} updated successfully!`)
+      fetchProducts()
+    } catch (e: any) {
+      toast.error(e.message || "Failed to update product")
+    }
   }
 
   // Open Delete Dialog
@@ -362,13 +401,17 @@ export default function ProductsPage() {
   }
 
   // Confirm Delete Product
-  const handleDeleteConfirm = () => {
+  const handleDeleteConfirm = async () => {
     if (!selectedProduct) return
-    const updated = products.filter(p => p.id !== selectedProduct.id)
-    saveProducts(updated)
-    setIsDeleteOpen(false)
-    toast.success(`${selectedProduct.productName} deleted successfully!`)
-    setSelectedProduct(null)
+    try {
+      await api.products.delete(selectedProduct.id)
+      setIsDeleteOpen(false)
+      toast.success(`${selectedProduct.productName} deleted successfully!`)
+      setSelectedProduct(null)
+      fetchProducts()
+    } catch (e: any) {
+      toast.error(e.message || "Failed to delete product")
+    }
   }
 
   // Filter products
@@ -453,12 +496,14 @@ export default function ProductsPage() {
               Live Ledger Active
             </div>
             
-            <Button 
-              onClick={handleOpenAdd}
-              className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
-            >
-              <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Add Product</span>
-            </Button>
+            {userPermissions.includes("Products.CRUD") && (
+              <Button 
+                onClick={handleOpenAdd}
+                className="bg-primary hover:bg-primary/95 text-primary-foreground font-semibold rounded-xl border-0 h-10 px-3 md:px-4 transition-all shadow-md shadow-primary/10"
+              >
+                <Plus className="w-5 h-5 md:w-4 md:h-4 md:mr-2" /> <span className="hidden md:inline">Add Product</span>
+              </Button>
+            )}
           </div>
         </header>
 
@@ -583,7 +628,9 @@ export default function ProductsPage() {
                         <TableHead className="text-foreground font-semibold px-6">Unit Price</TableHead>
                         <TableHead className="text-foreground font-semibold px-6">GST %</TableHead>
                         <TableHead className="text-foreground font-semibold px-6">Stock Level</TableHead>
-                        <TableHead className="text-foreground font-semibold text-right px-6">Actions</TableHead>
+                        {userPermissions.includes("Products.CRUD") && (
+                          <TableHead className="text-foreground font-semibold text-right px-6">Actions</TableHead>
+                        )}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -596,9 +643,14 @@ export default function ProductsPage() {
                             {/* Product Details */}
                             <TableCell className="px-6 font-semibold text-foreground">
                               <div className="flex items-center gap-3">
-                                <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center border border-primary/20 text-primary font-bold text-xs uppercase shrink-0">
-                                  <Package className="w-4 h-4 text-primary" />
-                                </div>
+                                {(() => {
+                                  const { bg, icon: CatIcon } = getCategoryStyling(String(product.categoryName));
+                                  return (
+                                    <div className={`w-9 h-9 rounded-lg flex items-center justify-center border shrink-0 ${bg}`}>
+                                      <CatIcon className="w-4 h-4" />
+                                    </div>
+                                  )
+                                })()}
                                 <div className="truncate max-w-[200px]">
                                   <span className="block truncate hover:text-primary transition-colors">{product.productName}</span>
                                   <span className="block text-[10px] font-normal text-muted-foreground truncate">{product.description || "No description provided"}</span>
@@ -633,10 +685,22 @@ export default function ProductsPage() {
 
                             {/* Stock Quantity / Level */}
                             <TableCell className="px-6 text-foreground">
-                              <div className="flex flex-col gap-1.5 items-start">
+                              <div className="flex flex-col gap-1.5 items-start w-full">
                                 <span className="text-sm font-bold font-mono text-foreground">
                                   {product.stockQuantity} {product.unit}
                                 </span>
+                                
+                                {/* Stock Mini Progress Bar */}
+                                <div className="w-24 h-1 bg-muted rounded-full overflow-hidden shadow-inner">
+                                  <div 
+                                    className={`h-full rounded-full transition-all duration-500 ${
+                                      product.stockQuantity === 0 ? 'w-full bg-red-500/50' : 
+                                      product.stockQuantity <= 10 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.5)]' : 'bg-emerald-500'
+                                    }`} 
+                                    style={{ width: product.stockQuantity === 0 ? '100%' : `${Math.min(100, product.stockQuantity * 2)}%` }}
+                                  ></div>
+                                </div>
+
                                 {product.stockQuantity === 0 ? (
                                   <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-red-500/10 text-red-500 border border-red-500/20">
                                     <AlertTriangle className="w-3 h-3" /> Out of Stock
@@ -654,50 +718,49 @@ export default function ProductsPage() {
                             </TableCell>
 
                             {/* Actions */}
-                            <TableCell className="px-6 text-right">
-                              <div className="flex items-center justify-end gap-1.5">
-                                {/* Edit Button */}
-                                <Button 
-                                  onClick={() => handleOpenEdit(product)}
-                                  variant="ghost" 
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
-                                  title="Edit Product Details"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </Button>
+                            {userPermissions.includes("Products.CRUD") && (
+                              <TableCell className="px-6 text-right">
+                                <div className="flex items-center justify-end gap-1.5">
+                                  {/* Edit Button */}
+                                  <Button 
+                                    onClick={() => handleOpenEdit(product)}
+                                    variant="ghost" 
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-emerald-500 hover:bg-emerald-500/10 rounded-lg transition-all"
+                                    title="Edit Product Details"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </Button>
 
-                                {/* Delete Button */}
-                                <Button 
-                                  onClick={() => handleOpenDelete(product)}
-                                  variant="ghost" 
-                                  size="icon"
-                                  className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
-                                  title="Delete Product"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
+                                  {/* Delete Button */}
+                                  <Button 
+                                    onClick={() => handleOpenDelete(product)}
+                                    variant="ghost" 
+                                    size="icon"
+                                    className="h-8 w-8 text-muted-foreground hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all"
+                                    title="Delete Product"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            )}
                           </TableRow>
                         ))
                       ) : (
                         <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={7} className="text-center py-16 text-muted-foreground px-6 border-b border-border">
-                            <div className="flex flex-col items-center justify-center space-y-3">
-                              <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground border border-border">
-                                <Package className="w-6 h-6 text-muted-foreground" />
+                          <TableCell colSpan={7} className="h-[400px]">
+                            <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                              <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                                <Package className="w-10 h-10 text-primary opacity-80" />
                               </div>
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">No Products Found</p>
-                                <p className="text-xs text-muted-foreground mt-1">Try resetting your search query or add a brand new product to your ledger.</p>
-                              </div>
-                              <Button 
-                                onClick={handleOpenAdd} 
-                                variant="outline" 
-                                className="mt-2 border-border hover:bg-accent text-foreground rounded-lg text-xs"
-                              >
-                                Add First Product
+                              <h3 className="text-xl font-black text-foreground mb-2">No Products Found</h3>
+                              <p className="text-sm text-muted-foreground mb-6">
+                                There are no products matching your filters. Try tweaking your search or add a new product to your catalogue.
+                              </p>
+                              <Button onClick={handleOpenAdd} className="font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add New Product
                               </Button>
                             </div>
                           </TableCell>
@@ -719,9 +782,14 @@ export default function ProductsPage() {
                     
                     <CardContent className="p-5 flex-1 flex flex-col">
                       <div className="flex justify-between items-start mb-4">
-                        <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center border border-primary/20 text-primary font-bold text-xs uppercase">
-                          <Package className="w-5 h-5 text-primary" />
-                        </div>
+                        {(() => {
+                          const { bg, icon: CatIcon } = getCategoryStyling(String(product.categoryName));
+                          return (
+                            <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${bg}`}>
+                              <CatIcon className="w-5 h-5" />
+                            </div>
+                          )
+                        })()}
                         <div className="flex flex-col items-end gap-2">
                           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-muted border border-border text-foreground/80">
                             <Tag className="w-3 h-3 text-primary/70 shrink-0" />
@@ -773,35 +841,41 @@ export default function ProductsPage() {
                         </div>
                       </div>
 
-                      <div className="flex gap-2 mt-auto">
-                        <Button 
-                          onClick={() => handleOpenEdit(product)}
-                          variant="outline" 
-                          className="flex-1 h-9 bg-background border-border text-xs font-bold hover:text-emerald-500 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all"
-                        >
-                          <Edit2 className="w-3.5 h-3.5 mr-2" /> Edit
-                        </Button>
-                        <Button 
-                          onClick={() => handleOpenDelete(product)}
-                          variant="outline" 
-                          className="h-9 w-9 p-0 bg-background border-border text-muted-foreground hover:text-red-500 hover:border-red-500/50 hover:bg-red-500/5 transition-all shrink-0"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
+                      {userPermissions.includes("Products.CRUD") && (
+                        <div className="flex gap-2 mt-auto">
+                          <Button 
+                            onClick={() => handleOpenEdit(product)}
+                            variant="outline" 
+                            className="flex-1 h-9 bg-background border-border text-xs font-bold hover:text-emerald-500 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all"
+                          >
+                            <Edit2 className="w-3.5 h-3.5 mr-2" /> Edit
+                          </Button>
+                          <Button 
+                            onClick={() => handleOpenDelete(product)}
+                            variant="outline" 
+                            className="h-9 w-9 p-0 bg-background border-border text-muted-foreground hover:text-red-500 hover:border-red-500/50 hover:bg-red-500/5 transition-all shrink-0"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 ))
               ) : (
-                <div className="col-span-full py-16 text-center border-2 border-dashed border-border rounded-2xl bg-card/50">
-                  <div className="flex flex-col items-center justify-center space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center text-muted-foreground border border-border">
-                      <Package className="w-6 h-6 text-muted-foreground" />
+                <div className="col-span-full h-[400px]">
+                  <div className="flex flex-col items-center justify-center h-full max-w-md mx-auto p-8 border-2 border-dashed border-border rounded-2xl bg-muted/5 text-center">
+                    <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mb-4">
+                      <Package className="w-10 h-10 text-primary opacity-80" />
                     </div>
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">No Products Found</p>
-                      <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">Adjust your search query or add a new product to populate the grid.</p>
-                    </div>
+                    <h3 className="text-xl font-black text-foreground mb-2">No Products Found</h3>
+                    <p className="text-sm text-muted-foreground mb-6">
+                      There are no products matching your filters. Try tweaking your search or add a new product to your catalogue.
+                    </p>
+                    <Button onClick={handleOpenAdd} className="font-bold bg-primary hover:bg-primary/90 text-primary-foreground">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Add New Product
+                    </Button>
                   </div>
                 </div>
               )}
@@ -850,17 +924,16 @@ export default function ProductsPage() {
                 <Label htmlFor="categoryName" className="text-xs font-bold text-foreground/80">Category *</Label>
                 <div className="relative">
                   <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/80 z-10" />
-                  <select
-                    id="categoryName"
-                    name="categoryName"
-                    value={formData.categoryName}
-                    onChange={handleInputChange}
-                    className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm appearance-none outline-none text-foreground"
-                  >
-                    {PRODUCT_CATEGORIES.map(category => (
-                      <option key={category} value={category} className="bg-card text-foreground">{category}</option>
-                    ))}
-                  </select>
+                  <Select value={formData.categoryName} onValueChange={(val) => handleInputChange({ target: { name: 'categoryName', value: val } } as any)}>
+                    <SelectTrigger className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm outline-none text-foreground">
+                      <SelectValue placeholder="Select Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PRODUCT_CATEGORIES.map(category => (
+                        <SelectItem key={category} value={category}>{category}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -917,17 +990,16 @@ export default function ProductsPage() {
               {/* GST Percent Dropdown Selection */}
               <div className="space-y-1.5">
                 <Label htmlFor="gstPercent" className="text-xs font-bold text-foreground/80">GST Rate (%) *</Label>
-                <select
-                  id="gstPercent"
-                  name="gstPercent"
-                  value={formData.gstPercent}
-                  onChange={handleInputChange}
-                  className="px-3.5 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm appearance-none outline-none text-foreground"
-                >
-                  {GST_PERCENTAGES.map(gst => (
-                    <option key={gst} value={gst.toString()} className="bg-card text-foreground">{gst}% GST</option>
-                  ))}
-                </select>
+                <Select value={formData.gstPercent} onValueChange={(val) => handleInputChange({ target: { name: 'gstPercent', value: val } } as any)}>
+                  <SelectTrigger className="px-3.5 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm outline-none text-foreground">
+                    <SelectValue placeholder="Select GST Rate" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GST_PERCENTAGES.map(gst => (
+                      <SelectItem key={gst} value={gst.toString()}>{gst}% GST</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Stock Quantity */}
@@ -952,17 +1024,16 @@ export default function ProductsPage() {
                 <Label htmlFor="unit" className="text-xs font-bold text-foreground/80">Unit of Measurement *</Label>
                 <div className="relative">
                   <Scale className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/80 z-10" />
-                  <select
-                    id="unit"
-                    name="unit"
-                    value={formData.unit}
-                    onChange={handleInputChange}
-                    className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm appearance-none outline-none text-foreground"
-                  >
-                    {MEASUREMENT_UNITS.map(unit => (
-                      <option key={unit} value={unit} className="bg-card text-foreground">{unit}</option>
-                    ))}
-                  </select>
+                  <Select value={formData.unit} onValueChange={(val) => handleInputChange({ target: { name: 'unit', value: val } } as any)}>
+                    <SelectTrigger className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm outline-none text-foreground">
+                      <SelectValue placeholder="Select Unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MEASUREMENT_UNITS.map(unit => (
+                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1041,17 +1112,16 @@ export default function ProductsPage() {
                 <Label htmlFor="edit-categoryName" className="text-xs font-bold text-foreground/80">Category *</Label>
                 <div className="relative">
                   <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/80 z-10" />
-                  <select
-                    id="edit-categoryName"
-                    name="categoryName"
-                    value={formData.categoryName}
-                    onChange={handleInputChange}
-                    className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm appearance-none outline-none text-foreground"
-                  >
-                    {PRODUCT_CATEGORIES.map(category => (
-                      <option key={category} value={category} className="bg-card text-foreground">{category}</option>
-                    ))}
-                  </select>
+                  <Select value={formData.categoryName} onValueChange={(val) => handleInputChange({ target: { name: 'categoryName', value: val } } as any)}>
+                    <SelectTrigger className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm outline-none text-foreground">
+                      <SelectValue placeholder="Select Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PRODUCT_CATEGORIES.map(category => (
+                        <SelectItem key={category} value={category}>{category}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
@@ -1108,17 +1178,16 @@ export default function ProductsPage() {
               {/* GST Percent Dropdown Selection */}
               <div className="space-y-1.5">
                 <Label htmlFor="edit-gstPercent" className="text-xs font-bold text-foreground/80">GST Rate (%) *</Label>
-                <select
-                  id="edit-gstPercent"
-                  name="gstPercent"
-                  value={formData.gstPercent}
-                  onChange={handleInputChange}
-                  className="px-3.5 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm appearance-none outline-none text-foreground"
-                >
-                  {GST_PERCENTAGES.map(gst => (
-                    <option key={gst} value={gst.toString()} className="bg-card text-foreground">{gst}% GST</option>
-                  ))}
-                </select>
+                <Select value={formData.gstPercent} onValueChange={(val) => handleInputChange({ target: { name: 'gstPercent', value: val } } as any)}>
+                  <SelectTrigger className="px-3.5 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm outline-none text-foreground">
+                    <SelectValue placeholder="Select GST Rate" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {GST_PERCENTAGES.map(gst => (
+                      <SelectItem key={gst} value={gst.toString()}>{gst}% GST</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Stock Quantity */}
@@ -1143,17 +1212,16 @@ export default function ProductsPage() {
                 <Label htmlFor="edit-unit" className="text-xs font-bold text-foreground/80">Unit of Measurement *</Label>
                 <div className="relative">
                   <Scale className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground/80 z-10" />
-                  <select
-                    id="edit-unit"
-                    name="unit"
-                    value={formData.unit}
-                    onChange={handleInputChange}
-                    className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm appearance-none outline-none text-foreground"
-                  >
-                    {MEASUREMENT_UNITS.map(unit => (
-                      <option key={unit} value={unit} className="bg-card text-foreground">{unit}</option>
-                    ))}
-                  </select>
+                  <Select value={formData.unit} onValueChange={(val) => handleInputChange({ target: { name: 'unit', value: val } } as any)}>
+                    <SelectTrigger className="pl-10 pr-4 bg-background border border-border hover:border-border/80 focus:ring-1 focus:ring-primary rounded-xl h-10 w-full text-sm outline-none text-foreground">
+                      <SelectValue placeholder="Select Unit" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {MEASUREMENT_UNITS.map(unit => (
+                        <SelectItem key={unit} value={unit}>{unit}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
 
